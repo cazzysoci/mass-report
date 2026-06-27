@@ -1,5 +1,5 @@
 [
-    {"url": "https://www.facebook.com/profile.php?id=100090194287839", "reason": "harassment"},
-    {"url": "https://www.facebook.com/profile.php?id=100090194287839", "reason": "fake_account"},
-    {"url": "https://www.facebook.com/profile.php?id=100090194287839", "reason": "violence"}
+    {"url": "https://www.facebook.com/username", "reason": "harassment"},
+    {"url": "https://www.facebook.com/username", "reason": "fake_account"},
+    {"url": "https://www.facebook.com/username", "reason": "violence"}
 ]
