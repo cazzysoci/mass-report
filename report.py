@@ -286,7 +286,7 @@ class FacebookReporter:
             return
         
         results = {"success": 0, "failed": 0, "skipped": 0, 
-                   "already": 0, "blocked": 0, "total": len(profiless)}
+                   "already": 0, "blocked": 0, "total": len(profiles)}
         
         for i, profile in enumerate(profiles):
             print(f"\n{'='*50}")
