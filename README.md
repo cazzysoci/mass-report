@@ -1,3 +1,3 @@
 ### Install this bruh ###
 
-```pip install -U setuptools```
+```pip install undetected-chromedriver fake-useragent selenium webdriver-manager requests```
