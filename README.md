@@ -32,3 +32,24 @@
 
 # Run the script
 ```python fb_reporter.py -e "your_email@example.com" -p "your_password" -f profiles.txt```
+
+
+
+# If Chromium not found
+```pkg install chromium -y```
+
+# If permission issues
+```termux-setup-storage```
+
+# If Python package issues
+```pip install --upgrade pip```
+```pip install selenium requests```
+
+
+
+
+# If undetected-chromedriver fails
+```pip install --upgrade undetected-chromedriver```
+
+# If ChromeDriver issues
+```pip install --upgrade webdriver-manager```
