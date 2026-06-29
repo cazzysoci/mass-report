@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Facebook Mass Report Tool v5.1 — Auto-Report Until Banned with Automatic 2FA Handling
+Facebook Mass Report Tool v5.0 — Auto-Report Until Banned with Rotating User Agents
 """
 
 import sys, os, json, random, time, re, logging
@@ -184,45 +184,20 @@ class Session:
         pass_inp.send_keys(Keys.RETURN)
         time.sleep(5 + random.randint(1, 3))
 
-        # Handle 2FA automatically - wait for user to solve it
-        for attempt in range(30):  # Try for up to ~2 minutes
+        # Check for 2FA
+        for _ in range(5):
             url = self.driver.current_url.lower()
-            
-            # Check if we're at the 2FA page
             if "checkpoint" in url or "two_step" in url or "authentication" in url:
-                log.warning("2FA required - Waiting for you to solve it...")
-                log.info("📱 Please solve 2FA in the browser window...")
-                log.info("⏳ Waiting for 2FA to be resolved...")
-                
-                # Wait for 2FA to be solved (check every 2 seconds)
-                for _ in range(30):  # Wait up to 60 seconds
-                    time.sleep(2)
-                    current_url = self.driver.current_url.lower()
-                    # Check if 2FA is resolved (no longer on checkpoint page)
-                    if "checkpoint" not in current_url and "two_step" not in current_url and "authentication" not in current_url:
-                        log.info("✅ 2FA resolved! Continuing...")
-                        time.sleep(3)
-                        # Save cookies after successful 2FA
-                        self._save_cookies()
-                        return True
+                log.warning("2FA required")
+                log.info("Please solve 2FA in the browser, then press Enter...")
+                input("Press Enter after solving 2FA...")
+                time.sleep(3)
                 break
-            elif "login" not in url or "facebook.com" in url:
-                # Successfully logged in
-                log.info("✅ Successfully logged in!")
-                self._save_cookies()
-                return True
-            
-            time.sleep(1)
-            
-        # Wait for any redirects to complete
-        time.sleep(3)
+            elif "login" not in url:
+                break
+            time.sleep(2)
 
-        # Check if login was successful
-        current_url = self.driver.current_url.lower()
-        if "login" in current_url and "checkpoint" not in current_url:
-            log.warning("Login may have failed. Trying to continue...")
-            
-        log.info(f"Current URL: {self.driver.current_url[:50]}")
+        log.info(f"Logged in! ({self.driver.current_url[:50]})")
         self._save_cookies()
         return True
 
@@ -783,7 +758,7 @@ class Reporter:
 
 def banner():
     print("\n" + "="*70)
-    print("  FB Mass Report v5.1 — Auto-Report Until Banned with Automatic 2FA Handling")
+    print("  FB Mass Report v5.0 — Auto-Report Until Banned with Rotating User Agents")
     print("="*70)
 
 def menu():
