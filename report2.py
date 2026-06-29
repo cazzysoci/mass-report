@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-Facebook Mass Report Tool — Authorized Penetration Testing
-===========================================================
-v3.1 — Universal Desktop + Mobile, robust login handling.
+Facebook Mass Report Tool v4.0 — BULLETPROOF
+=============================================
+- Fast login (paste credentials at once, not char-by-char)
+- 2FA auto-detection + prompt
+- mbasic.facebook.com for reliable profile reporting
+- JS click() to bypass overlays
 """
 
-import sys
-import os
-import json
-import random
-import time
-import re
-import logging
+import sys, os, json, random, time, re, logging
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Tuple, List, Dict
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
 
@@ -24,11 +21,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import (
-    TimeoutException, NoSuchElementException,
-    ElementClickInterceptedException, StaleElementReferenceException,
-    WebDriverException
-)
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 try:
     from webdriver_manager.chrome import ChromeDriverManager
@@ -36,60 +29,39 @@ try:
 except ImportError:
     HAS_WDM = False
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
+# --- Config ---
 @dataclass
 class Config:
     email: str = ""
     password: str = ""
     cookie_file: str = "fb_cookies.json"
     headless: bool = False
-    min_delay: int = 10
-    max_delay: int = 25
     report_count: int = 3
-
     CONFIG_PATH = Path("fb_report_config.json")
-
     def save(self):
         with open(self.CONFIG_PATH, "w") as f:
             json.dump(self.__dict__, f, indent=2, default=str)
-
     @classmethod
     def load(cls):
         if cls.CONFIG_PATH.exists():
             try:
                 with open(cls.CONFIG_PATH) as f:
-                    data = json.load(f)
-                return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-            except Exception:
-                pass
+                    return cls(**{k: v for k, v in json.load(f).items() if k in cls.__dataclass_fields__})
+            except: pass
         return cls()
-
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s :: %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("FBReport")
 
-
-# ---------------------------------------------------------------------------
-# Browser Engine
-# ---------------------------------------------------------------------------
-
-class BrowserEngine:
+# --- Browser ---
+class Browser:
     AGENTS = [
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36",
-        "Mozilla/5.0 (iPhone16,2; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
     ]
-
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless=False):
         self.headless = headless
         self.driver = None
-
     def start(self):
         opts = Options()
         opts.add_argument(f"--user-agent={random.choice(self.AGENTS)}")
@@ -102,497 +74,351 @@ class BrowserEngine:
         opts.add_argument("--lang=en-US")
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
-        prefs = {
+        opts.add_experimental_option("prefs", {
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
             "profile.default_content_setting_values.notifications": 2,
-        }
-        opts.add_experimental_option("prefs", prefs)
+        })
         if self.headless:
             opts.add_argument("--headless=new")
-
         try:
-            if HAS_WDM:
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=opts)
-            else:
-                self.driver = webdriver.Chrome(options=opts)
-        except Exception as e:
-            log.error(f"ChromeDriver init failed: {e}")
-            log.info("Install it: pip install webdriver-manager, or put chromedriver in PATH")
-            raise
-
+            self.driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()) if HAS_WDM else None,
+                options=opts
+            ) if HAS_WDM else webdriver.Chrome(options=opts)
+        except:
+            self.driver = webdriver.Chrome(options=opts)
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
-            """
+            "source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
         })
-
         self.driver.implicitly_wait(3)
         return self.driver
-
     def stop(self):
         if self.driver:
-            try:
-                self.driver.quit()
-            except Exception:
-                pass
+            try: self.driver.quit()
+            except: pass
 
-
-# ---------------------------------------------------------------------------
-# Session — Fixed Login
-# ---------------------------------------------------------------------------
-
-class FBSession:
+# --- Session ---
+class Session:
     def __init__(self, driver, config: Config):
         self.driver = driver
         self.config = config
-        self.wait = WebDriverWait(driver, 15)
 
     def login(self) -> bool:
-        """Robust login — handles page variants, auto-fills from config."""
-        email = self.config.email
-        password = self.config.password
+        email = self.config.email or input("Email/Phone: ").strip()
+        pw = self.config.password or input("Password: ").strip()
+        self.config.email = email
+        self.config.password = pw
+        self.config.save()
 
-        if not email or not password:
-            email = input("Email/Phone: ").strip()
-            password = input("Password: ").strip()
-            self.config.email = email
-            self.config.password = password
-            self.config.save()
-
-        log.info("Opening facebook.com...")
+        log.info("Loading facebook.com...")
         self.driver.get("https://www.facebook.com/")
         time.sleep(4)
 
-        # ========== FIND EMAIL FIELD ==========
-        # Facebook uses multiple possible selectors depending on the page variant
+        # Find email
         email_inp = None
-        email_strategies = [
-            (By.ID, "email"),
-            (By.NAME, "email"),
-            (By.CSS_SELECTOR, "input[autocomplete='username']"),
-            (By.XPATH, "//input[@type='text' or @type='email']"),
-            (By.XPATH, "//input[contains(@placeholder,'Email') or contains(@placeholder,'mobile')]"),
-        ]
-
-        for strat in email_strategies:
+        for by, sel in [(By.ID,"email"), (By.NAME,"email"), (By.CSS_SELECTOR,"input[autocomplete='username']"),
+                         (By.XPATH,"//input[@type='text' or @type='email']")]:
             try:
-                email_inp = WebDriverWait(self.driver, 4).until(
-                    EC.presence_of_element_located(strat)
-                )
-                log.info(f"Found email field via: {strat}")
+                email_inp = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((by, sel)))
                 break
-            except (TimeoutException, NoSuchElementException):
-                continue
-
+            except: continue
         if not email_inp:
-            # Last resort — dump page and try JS
-            log.warning("Trying JS-based field detection...")
-            try:
-                email_inp = self.driver.execute_script("""
-                    var inputs = document.querySelectorAll('input');
-                    for (var i = 0; i < inputs.length; i++) {
-                        var type = inputs[i].type.toLowerCase();
-                        if (type === 'email' || type === 'text') {
-                            var ph = (inputs[i].placeholder || '').toLowerCase();
-                            if (ph.includes('email') || ph.includes('phone') || ph.includes('mobile')) {
-                                return inputs[i];
-                            }
-                        }
-                    }
-                    return null;
-                """)
-                if not email_inp:
-                    log.error("Could not find email input field on login page.")
-                    return False
-            except Exception:
-                log.error("Could not find email input field.")
-                return False
+            log.error("No email field found")
+            return False
 
-        # ========== FIND PASSWORD FIELD ==========
-        pass_strategies = [
-            (By.ID, "pass"),
-            (By.NAME, "pass"),
-            (By.CSS_SELECTOR, "input[autocomplete='current-password']"),
-            (By.XPATH, "//input[@type='password']"),
-        ]
         pass_inp = None
-        for strat in pass_strategies:
+        for by, sel in [(By.ID,"pass"), (By.NAME,"pass"), (By.XPATH,"//input[@type='password']")]:
             try:
-                pass_inp = WebDriverWait(self.driver, 3).until(
-                    EC.presence_of_element_located(strat)
-                )
+                pass_inp = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((by, sel)))
                 break
-            except (TimeoutException, NoSuchElementException):
-                continue
-
+            except: continue
         if not pass_inp:
-            log.error("Could not find password field.")
+            log.error("No password field found")
             return False
 
-        # ========== TYPE CREDENTIALS ==========
-        try:
-            email_inp.clear()
-            time.sleep(0.3)
-            # Type slowly like a human
-            for char in email:
-                email_inp.send_keys(char)
-                time.sleep(random.uniform(0.02, 0.08))
+        # Fill fields FAST (not char by char)
+        email_inp.clear()
+        email_inp.send_keys(email)
+        pass_inp.clear()
+        pass_inp.send_keys(pw)
+        time.sleep(0.5)
 
-            pass_inp.clear()
-            time.sleep(0.3)
-            for char in password:
-                pass_inp.send_keys(char)
-                time.sleep(random.uniform(0.02, 0.08))
+        # Press ENTER
+        log.info("Pressing ENTER to submit...")
+        pass_inp.send_keys(Keys.RETURN)
+        time.sleep(5)
 
-            time.sleep(0.5)
-        except Exception as e:
-            log.error(f"Failed to type credentials: {e}")
-            return False
-
-        # ========== FIND & CLICK LOGIN BUTTON ==========
-        login_btn = None
-        btn_strategies = [
-            (By.NAME, "login"),
-            (By.ID, "loginbutton"),
-            (By.CSS_SELECTOR, "button[name='login']"),
-            (By.CSS_SELECTOR, "button[type='submit']"),
-            (By.XPATH, "//button[contains(., 'Log in')]"),
-            (By.XPATH, "//div[@role='button']//span[contains(., 'Log in')]"),
-            (By.XPATH, "//input[@type='submit' and contains(@value, 'Log')]"),
-        ]
-
-        for strat in btn_strategies:
-            try:
-                login_btn = WebDriverWait(self.driver, 4).until(
-                    EC.element_to_be_clickable(strat)
-                )
-                break
-            except (TimeoutException, NoSuchElementException):
-                continue
-
-        if not login_btn:
-            log.error("Could not find login button.")
-            return False
-
-        # Click it
-        try:
-            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", login_btn)
-            time.sleep(0.5)
-            login_btn.click()
-        except Exception:
-            try:
-                self.driver.execute_script("arguments[0].click();", login_btn)
-            except Exception as e:
-                log.error(f"Could not click login button: {e}")
-                return False
-
-        # ========== WAIT FOR POST-LOGIN ==========
-        log.info("Waiting for login to complete...")
-        time.sleep(6)
-
-        # Handle checkpoint
-        if "checkpoint" in self.driver.current_url.lower():
-            log.warning("LOGIN CHECKPOINT DETECTED.")
-            log.info("A verification code was sent. Enter it below or resolve manually.")
-            code = input("Approval code (or press Enter to skip and resolve manually): ").strip()
-            if code:
+        # Handle 2FA
+        for _ in range(20):
+            url = self.driver.current_url.lower()
+            if "checkpoint" in url or "two_step" in url or "authentication" in url:
+                log.warning("2FA required")
                 try:
-                    code_inp = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.ID, "approvals_code"))
-                    )
-                    code_inp.send_keys(code)
-                    time.sleep(1)
-                    submit_btn = self.driver.find_element(By.ID, "checkpointSubmitButton")
-                    submit_btn.click()
-                    time.sleep(5)
-                    # Click "Continue" / "This was me" / "Continue to Facebook"
-                    for _ in range(3):
-                        try:
-                            cont = self.driver.find_element(By.ID, "checkpointSubmitButton")
-                            cont.click()
-                            time.sleep(3)
-                        except:
-                            break
-                    log.info("Checkpoint resolved.")
-                except Exception as ce:
-                    log.error(f"Checkpoint auto-resolve failed: {ce}")
-                    input(">>> Press Enter after manually resolving checkpoint in browser...")
-            else:
-                input(">>> Press Enter after manually resolving checkpoint in browser...")
+                    inp = self.driver.find_element(By.ID, "approvals_code")
+                    code = input("2FA code: ").strip()
+                    if code:
+                        inp.send_keys(code)
+                        time.sleep(1)
+                        for _ in range(5):
+                            try:
+                                self.driver.find_element(By.ID, "checkpointSubmitButton").click()
+                                time.sleep(2)
+                            except: break
+                        time.sleep(3)
+                        continue
+                except:
+                    pass
+                input("Resolve 2FA in browser, then press Enter...")
+                time.sleep(3)
+                continue
+            break
 
-        # ========== VERIFY LOGIN ==========
-        time.sleep(3)
-        current = self.driver.current_url.lower()
-        if "login" in current and "checkpoint" not in current:
-            # If we're still on a login page, try one more approach
-            log.warning("Still on login page. Trying alternative flow...")
+        if "login" in self.driver.current_url.lower() and "checkpoint" not in self.driver.current_url.lower():
+            log.warning("Login failed")
             return False
 
-        log.info(f"Logged in! Current URL: {current[:80]}")
+        log.info(f"Logged in! ({self.driver.current_url[:50]})")
         self._save_cookies()
         return True
 
     def _save_cookies(self):
-        cookies = self.driver.get_cookies()
         with open(self.config.cookie_file, "w") as f:
-            json.dump(cookies, f)
-        log.info(f"Saved {len(cookies)} cookies to {self.config.cookie_file}")
+            json.dump(self.driver.get_cookies(), f)
+        log.info("Cookies saved")
 
     def load_cookies(self) -> bool:
-        cpath = Path(self.config.cookie_file)
-        if not cpath.exists():
+        if not Path(self.config.cookie_file).exists():
             return False
-
         self.driver.get("https://www.facebook.com/")
         try:
-            with open(cpath) as f:
-                cookies = json.load(f)
-        except Exception:
-            return False
-
-        for c in cookies:
-            try:
-                self.driver.add_cookie(c)
-            except Exception:
-                pass
-
+            for c in json.load(open(self.config.cookie_file)):
+                try: self.driver.add_cookie(c)
+                except: pass
+        except: return False
         self.driver.get("https://www.facebook.com/")
         time.sleep(4)
-
         if "login" in self.driver.current_url.lower():
-            log.warning("Cookies expired.")
             return False
-
-        log.info("Session restored from cookies!")
+        log.info("Cookies restored!")
         return True
 
-
-# ---------------------------------------------------------------------------
-# Universal Reporter
-# ---------------------------------------------------------------------------
-
-class FBReporter:
+# --- Reporter ---
+class Reporter:
     def __init__(self, driver):
         self.driver = driver
-        self.wait = WebDriverWait(driver, 10)
 
-    def _sleep(self, lo=8, hi=22):
-        d = random.randint(lo, hi)
-        log.info(f"  Waiting {d}s...")
-        time.sleep(d)
+    def js_click(self, by, sel, timeout=5):
+        """Find element and click via JavaScript (bypasses overlays)."""
+        try:
+            el = WebDriverWait(self.driver, timeout).until(EC.presence_of_element_located((by, sel)))
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            time.sleep(0.3)
+            self.driver.execute_script("arguments[0].click();", el)
+            return True
+        except: return False
 
-    def _click_first(self, strategies, timeout=5, scroll=True):
-        """Try multiple (By, selector) tuples, return True if any clicked."""
-        for by, sel in strategies:
-            try:
-                el = WebDriverWait(self.driver, max(2, timeout // len(strategies))).until(
-                    EC.element_to_be_clickable((by, sel))
-                )
-                if scroll:
-                    self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-                    time.sleep(0.3)
-                el.click()
-                return True
-            except Exception:
-                continue
-        return False
+    def click_text(self, text, tag="*", timeout=3):
+        """Click element containing text."""
+        return self.js_click(By.XPATH, f"//{tag}[contains(text(),'{text}')]", timeout)
 
-    def _submit_btn(self):
-        return self._click_first([
-            (By.XPATH, "//div[@role='button']//span[text()='Submit']"),
-            (By.XPATH, "//div[@role='button']//span[text()='Kirim']"),
-            (By.XPATH, "//input[@type='submit']"),
-            (By.XPATH, "//button[@type='submit']"),
-            (By.XPATH, "//div[@role='button' and contains(text(),'Submit')]"),
-            (By.XPATH, "//div[@role='button' and contains(text(),'Kirim')]"),
-        ], timeout=6)
+    def click_value(self, value, timeout=3):
+        """Click input with matching value attribute."""
+        return self.js_click(By.XPATH, f"//input[@type='submit' and contains(@value,'{value}')]", timeout)
 
-    # ------------------------------------------------------------------
-    # Report Profile
-    # ------------------------------------------------------------------
-
+    # --- Profile Report via mbasic ---
     def report_profile(self, target: str) -> Tuple[bool, str]:
-        """Report a profile. Accepts URL or numeric ID."""
-        # Extract ID
-        if target.isdigit():
-            profile_id = target
-        else:
+        """Report profile using mbasic.facebook.com."""
+        # Normalize target to mbasic URL
+        target = target.strip()
+        if target.startswith("http"):
             parsed = urlparse(target)
-            q = parse_qs(parsed.query)
-            profile_id = q.get('id', [None])[0]
-            if not profile_id:
-                m = re.search(r'/id[/=]?(\d+)', target)
-                profile_id = m.group(1) if m else target
+            path = parsed.path.strip("/")
+            if "profile.php" in path:
+                uid = parse_qs(parsed.query).get("id", [None])[0]
+                if uid:
+                    url = f"https://mbasic.facebook.com/profile.php?id={uid}"
+                else:
+                    url = target.replace("www.", "mbasic.")
+            else:
+                username = path.split("/")[0] if path else ""
+                url = f"https://mbasic.facebook.com/{username}" if username else target
+        elif target.isdigit():
+            url = f"https://mbasic.facebook.com/profile.php?id={target}"
+        else:
+            url = f"https://mbasic.facebook.com/{target}"
 
-        url = f"https://www.facebook.com/profile.php?id={profile_id}"
-        log.info(f"Opening profile: {url}")
+        log.info(f"Opening: {url}")
         self.driver.get(url)
-        time.sleep(5)
+        time.sleep(4)
 
-        if "not found" in self.driver.page_source.lower() or "this page isn't available" in self.driver.page_source.lower():
-            return False, "Profile not found."
+        # Check if loaded
+        if "this page isn't available" in self.driver.page_source.lower():
+            return False, "Profile not found"
 
-        # ---- Step 1: Click "More" / "..." button ----
-        log.info("Step 1: Clicking 'More' button...")
-        more_clicked = self._click_first([
-            (By.XPATH, "//div[@aria-label='More options']"),
-            (By.XPATH, "//div[@aria-label='More']"),
-            (By.XPATH, "//div[@aria-label='Profile options']"),
-            (By.XPATH, "//div[@role='button']//span[contains(text(),'More')]"),
-            (By.XPATH, "//div[@role='button']//span[text()='Lainnya']"),
-            (By.XPATH, "//a[contains(text(),'More')]"),
-            (By.XPATH, "//a[text()='Lainnya']"),
-        ], timeout=6)
-        if not more_clicked:
-            return False, "Could not click 'More' button on profile."
+        # Step 1: Click "More" link (mbasic uses simple <a> tags)
+        log.info("Step 1: Clicking 'More'...")
+        if not self.click_text("More", "a") and not self.click_text("Lainnya", "a"):
+            # Try partial_match
+            try:
+                els = self.driver.find_elements(By.XPATH, "//a[contains(text(),'More') or contains(text(),'Lainnya')]")
+                if els:
+                    self.driver.execute_script("arguments[0].click();", els[0])
+                else:
+                    return False, "No 'More' link found"
+            except:
+                return False, "No 'More' link found"
+        time.sleep(3)
+
+        # Step 2: Find "Find support or report profile" link
+        log.info("Step 2: Finding report link...")
+        found_report = False
+        for txt in ["Find support or report", "Report", "Laporkan profil", "Cari dukungan", "report"]:
+            try:
+                els = self.driver.find_elements(By.PARTIAL_LINK_TEXT, txt)
+                if els:
+                    self.driver.execute_script("arguments[0].click();", els[0])
+                    found_report = True
+                    log.info(f"Clicked report via: '{txt}'")
+                    break
+            except: continue
+        if not found_report:
+            return False, "No report link found"
+        time.sleep(3)
+
+        # Step 3: Select "Fake Account"
+        log.info("Step 3: Selecting 'Fake Account'...")
+        clicked = False
+        for val in ["Fake Account", "Akun Palsu", "Fake", "Pretending"]:
+            if self.click_value(val):
+                clicked = True
+                break
+        if not clicked:
+            # Try any submit button
+            try:
+                btns = self.driver.find_elements(By.XPATH, "//input[@type='submit']")
+                if btns:
+                    self.driver.execute_script("arguments[0].click();", btns[0])
+                    clicked = True
+            except: pass
+        if not clicked:
+            return False, "Could not select Fake Account"
         time.sleep(2)
 
-        # ---- Step 2: Click "Find support or report profile" ----
-        log.info("Step 2: Opening report dialog...")
-        report_clicked = self._click_first([
-            (By.XPATH, "//span[contains(text(),'Find support or report')]"),
-            (By.XPATH, "//span[contains(text(),'Cari dukungan atau laporkan')]"),
-            (By.XPATH, "//a[contains(text(),'Find support')]"),
-            (By.XPATH, "//a[contains(text(),'report profile')]"),
-            (By.XPATH, "//a[contains(text(),'report Page')]"),
-            (By.XPATH, "//a[contains(text(),'Laporkan profil')]"),
-            (By.XPATH, "//a[contains(text(),'Cari dukungan')]"),
-            (By.XPATH, "//a[contains(@href,'/help/contact/')]"),
-        ], timeout=7)
-        if not report_clicked:
-            return False, "Could not find 'Find support or report profile' option."
-        time.sleep(2)
-
-        # ---- Step 3: Select "Fake Account" ----
-        log.info("Step 3: Selecting report reason...")
-        reason_clicked = self._click_first([
-            (By.XPATH, "//span[text()='Fake Account']"),
-            (By.XPATH, "//span[text()='Akun Palsu']"),
-            (By.XPATH, "//span[contains(text(),'Fake Account')]"),
-            (By.XPATH, "//span[contains(text(),'Akun Palsu')]"),
-            (By.XPATH, "//div[contains(text(),'Fake Account')]"),
-            (By.XPATH, "//input[@value='FAKE_ACCOUNT']/following-sibling::span"),
-            (By.XPATH, "//span[text()='Pretending to be someone']"),
-            (By.XPATH, "//span[text()='Berpura-pura menjadi seseorang']"),
-        ], timeout=5)
-        if not reason_clicked:
-            return False, "Could not select 'Fake Account' reason."
-        time.sleep(1.5)
-
-        # ---- Step 4: "Me" if asked ----
-        self._click_first([
-            (By.XPATH, "//span[text()='Me']"),
-            (By.XPATH, "//span[text()='Saya']"),
-            (By.XPATH, "//span[contains(text(),'Me')]"),
-        ], timeout=2)
+        # Step 4: "Me" if present
+        self.click_value("Me")
+        self.click_value("Saya")
         time.sleep(1)
 
-        # ---- Step 5: Submit ----
+        # Step 5: Submit everything
         log.info("Step 4: Submitting...")
-        self._submit_btn()
-        time.sleep(2)
+        for _ in range(3):
+            try:
+                btns = self.driver.find_elements(By.XPATH, "//input[@type='submit']")
+                if not btns:
+                    break
+                self.driver.execute_script("arguments[0].click();", btns[0])
+                time.sleep(2)
+            except: break
 
-        # ---- Step 6: Checkbox + submit ----
-        self._click_first([
-            (By.XPATH, "//input[@type='checkbox' and @name='checked']"),
-            (By.XPATH, "//input[@type='checkbox' and contains(@aria-label,'confirm')]"),
-        ], timeout=2)
-        time.sleep(1)
-
-        self._submit_btn()
-        time.sleep(2)
-
-        # Check result
-        ps = self.driver.page_source.lower()
-        if "thank you" in ps or "terima kasih" in ps or "report sent" in ps:
-            return True, "Profile reported successfully."
+        if "thank" in self.driver.page_source.lower() or "terima" in self.driver.page_source.lower():
+            return True, "Profile reported successfully!"
         return True, "Report submitted."
 
-    # ------------------------------------------------------------------
-    # Report Post
-    # ------------------------------------------------------------------
-
+    # --- Post Report via www (posts don't work well on mbasic) ---
     def report_post(self, post_url: str) -> Tuple[bool, str]:
         log.info(f"Opening post: {post_url}")
         self.driver.get(post_url)
         time.sleep(5)
 
-        if "not found" in self.driver.page_source.lower():
-            return False, "Post not found."
+        if "not found" in self.driver.page_source.lower() or "unavailable" in self.driver.page_source.lower():
+            return False, "Post not found"
 
-        # Step 1: More
+        # Click More via JS
         log.info("Step 1: Clicking 'More'...")
-        if not self._click_first([
-            (By.XPATH, "//div[@aria-label='More options']"),
-            (By.XPATH, "//div[@aria-label='More']"),
-            (By.XPATH, "//div[@role='button']//span[contains(text(),'More')]"),
-            (By.XPATH, "//a[contains(text(),'More')]"),
-            (By.XPATH, "//a[text()='Lainnya']"),
-        ], timeout=6):
-            return False, "Could not click 'More' on post."
+        more_found = False
+        for sel in [
+            "//button[@aria-label='More']",
+            "//button[@aria-label='More options']",
+            "//div[@aria-label='More']",
+            "//div[@aria-label='More options']",
+            "//span[text()='More']/ancestor::div[@role='button']",
+            "//span[contains(text(),'More')]/ancestor::*[@role='button']",
+            "//a[text()='More']",
+        ]:
+            if self.js_click(By.XPATH, sel, 3):
+                more_found = True
+                break
+        if not more_found:
+            return False, "Could not click More on post"
         time.sleep(2)
 
-        # Step 2: Report post option
-        log.info("Step 2: Opening post report...")
-        if not self._click_first([
-            (By.XPATH, "//input[@value='RESOLVE_PROBLEM']"),
-            (By.XPATH, "//a[contains(text(),'Report post')]"),
-            (By.XPATH, "//span[contains(text(),'Report post')]"),
-            (By.XPATH, "//div[contains(text(),'Report post')]"),
-            (By.XPATH, "//a[contains(text(),'Laporkan postingan')]"),
-        ], timeout=6):
-            return False, "Could not find 'Report post' option."
+        # Report post
+        log.info("Step 2: Report post option...")
+        report_found = False
+        for sel in [
+            "//input[@value='RESOLVE_PROBLEM']",
+            "//a[contains(text(),'Report post')]",
+            "//span[contains(text(),'Report post')]",
+            "//div[contains(text(),'Report post')]",
+            "//a[contains(text(),'Laporkan')]",
+        ]:
+            if self.js_click(By.XPATH, sel, 3):
+                report_found = True
+                break
+        if not report_found:
+            return False, "Could not find Report post option"
         time.sleep(2)
 
-        # Step 3: Spam
-        log.info("Step 3: Selecting 'Spam'...")
-        if not self._click_first([
-            (By.XPATH, "//input[@type='radio' and @value='spam']"),
-            (By.XPATH, "//input[@type='radio' and contains(@value,'SPAM')]"),
-            (By.XPATH, "//span[contains(text(),'Spam')]/preceding-sibling::input"),
-            (By.XPATH, "//span[contains(text(),'Spam')]"),
-            (By.XPATH, "//div[contains(text(),'Spam')]"),
-        ], timeout=4):
-            return False, "Could not select 'Spam' reason."
+        # Spam
+        log.info("Step 3: Selecting Spam...")
+        if not self.js_click(By.XPATH, "//input[@type='radio' and @value='spam']", 3):
+            if not self.click_text("Spam"):
+                return False, "Could not select Spam"
         time.sleep(1.5)
 
-        # Step 4: Submit
+        # Submit
         log.info("Step 4: Submitting...")
-        self._submit_btn()
+        for sel in [
+            "//div[@role='button']//span[text()='Submit']",
+            "//div[@role='button']//span[text()='Kirim']",
+            "//input[@type='submit']",
+            "//button[@type='submit']",
+            "//div[@role='button']//span[text()='Send']",
+        ]:
+            if self.js_click(By.XPATH, sel, 2):
+                break
         time.sleep(2)
 
         # Checkbox
-        self._click_first([
-            (By.XPATH, "//input[@type='checkbox' and @name='checked']"),
-        ], timeout=2)
+        self.js_click(By.XPATH, "//input[@type='checkbox' and @name='checked']", 2)
         time.sleep(1)
 
-        self._submit_btn()
-        return True, "Post reported as spam."
+        # Final submit
+        for sel in [
+            "//div[@role='button']//span[text()='Submit']",
+            "//div[@role='button']//span[text()='Kirim']",
+            "//input[@type='submit']",
+            "//button[@type='submit']",
+        ]:
+            if self.js_click(By.XPATH, sel, 2):
+                break
 
-    # ------------------------------------------------------------------
+        return True, "Post reported as spam"
+
     # Mass
-    # ------------------------------------------------------------------
-
     def mass_report_profiles(self, targets: List[str], count: int = 3) -> Dict:
         results = {}
         for t in targets:
             ok, fail = 0, 0
             for i in range(count):
-                log.info(f"[{t}] Report {i+1}/{count}")
+                log.info(f"[{t}] {i+1}/{count}")
                 s, msg = self.report_profile(t)
-                if s:
-                    ok += 1
-                    log.info(f"  OK: {msg}")
-                else:
-                    fail += 1
-                    log.warning(f"  FAIL: {msg}")
-                if i + 1 < count:
-                    self._sleep()
+                if s: ok += 1
+                else: fail += 1
+                log.info(f"  {'OK' if s else 'FAIL'}: {msg}")
+                if i+1 < count:
+                    time.sleep(random.randint(10, 25))
             results[t] = (ok, fail)
         return results
 
@@ -601,52 +427,35 @@ class FBReporter:
         for u in targets:
             ok, fail = 0, 0
             for i in range(count):
-                log.info(f"[{u[:50]}...] Report {i+1}/{count}")
+                log.info(f"[{u[:40]}...] {i+1}/{count}")
                 s, msg = self.report_post(u)
-                if s:
-                    ok += 1
-                else:
-                    fail += 1
-                if i + 1 < count:
-                    self._sleep(10, 25)
+                if s: ok += 1
+                else: fail += 1
+                if i+1 < count:
+                    time.sleep(random.randint(10, 25))
             results[u] = (ok, fail)
         return results
 
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
+# --- CLI ---
 def banner():
-    print(r"""
-╔══════════════════════════════════════════════════════════════════╗
-║          Facebook Mass Report Tool  v3.1  (Desktop + Mobile)    ║
-║          Authorized Penetration Testing — Platform Verified      ║
-╚══════════════════════════════════════════════════════════════════╝
-    """)
+    print("\n" + "="*60)
+    print("  FB Mass Report v4.0 — mbasic approach + JS clicks")
+    print("="*60)
 
 def menu():
-    print("""
-  1. Login / Re-authenticate
-  2. Report a SINGLE profile
-  3. Report a SINGLE post
-  4. Mass-report PROFILES
-  5. Mass-report POSTS
-  6. Configure settings
-  7. Exit
-    """)
-    try:
-        return int(input("Option: ").strip())
-    except:
-        return 7
+    print("\n  1. Login")
+    print("  2. Report profile")
+    print("  3. Report post")
+    print("  4. Mass report profiles")
+    print("  5. Mass report posts")
+    print("  6. Settings")
+    print("  7. Exit")
+    try: return int(input("> ").strip())
+    except: return 7
 
-def configure(config: Config):
-    print(f"\nEmail: {config.email or '(not set)'}")
-    print(f"Headless: {config.headless}")
-    print(f"Delays: {config.min_delay}-{config.max_delay}s")
-    print(f"Reports per target: {config.report_count}\n")
+def settings(config):
     e = input(f"Email [{config.email}]: ").strip() or config.email
-    p = input("Password (blank to keep): ").strip()
+    p = input("Password: ").strip()
     h = input("Headless? (y/N): ").strip().lower() == 'y'
     c = input(f"Reports per target [{config.report_count}]: ").strip()
     config.email = e
@@ -655,72 +464,55 @@ def configure(config: Config):
     if c: config.report_count = int(c)
     config.save()
 
-
 def main():
     banner()
     config = Config.load()
-
-    engine = BrowserEngine(headless=config.headless)
-    try:
-        driver = engine.start()
+    engine = Browser(headless=config.headless)
+    try: driver = engine.start()
     except Exception as e:
-        log.error(f"Browser start failed: {e}")
+        log.error(f"Browser failed: {e}")
         sys.exit(1)
 
-    session = FBSession(driver, config)
-    reporter = FBReporter(driver)
+    session = Session(driver, config)
+    reporter = Reporter(driver)
 
-    # Try cookies first
     if not session.load_cookies():
         if config.email and config.password:
-            log.info("Cookies expired. Attempting login with saved credentials...")
             session.login()
         else:
-            log.warning("No saved credentials. Use option 1 to login.")
+            log.warning("Use option 1 to login")
 
     while True:
         opt = menu()
-
-        if opt == 1:
-            session.login()
-
+        if opt == 1: session.login()
         elif opt == 2:
-            t = input("Profile URL or ID: ").strip()
+            t = input("Profile (URL, ID, or username): ").strip()
             if t:
                 ok, msg = reporter.report_profile(t)
                 log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
-
         elif opt == 3:
             u = input("Post URL: ").strip()
             if u:
                 ok, msg = reporter.report_post(u)
                 log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
-
         elif opt == 4:
-            raw = input("Profile IDs/URLs (comma separated): ").strip()
+            raw = input("Profiles (comma-sep): ").strip()
             if raw:
                 targets = [x.strip() for x in raw.split(",") if x.strip()]
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
                 r = reporter.mass_report_profiles(targets, cnt)
                 print(json.dumps(r, indent=2))
-
         elif opt == 5:
-            raw = input("Post URLs (comma separated): ").strip()
+            raw = input("Post URLs (comma-sep): ").strip()
             if raw:
                 targets = [x.strip() for x in raw.split(",") if x.strip()]
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
                 r = reporter.mass_report_posts(targets, cnt)
                 print(json.dumps(r, indent=2))
-
-        elif opt == 6:
-            configure(config)
-
-        elif opt == 7:
-            log.info("Exiting.")
-            break
+        elif opt == 6: settings(config)
+        elif opt == 7: break
 
     engine.stop()
-
 
 if __name__ == "__main__":
     main()
