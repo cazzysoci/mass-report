@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Facebook Mass Report Tool v5.0 — Auto-Report Until Banned with Rotating User Agents
+Facebook Mass Report Tool v5.1 — Auto-Report Until Banned with Automatic 2FA Handling
 """
 
 import sys, os, json, random, time, re, logging
@@ -37,21 +37,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
 ]
 
-# Additional headers
-EXTRA_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "DNT": "1",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
-}
-
 @dataclass
 class Config:
     email: str = ""
@@ -63,7 +48,7 @@ class Config:
     report_delay_min: int = 30
     report_delay_max: int = 90
     auto_continue: bool = True
-    report_type: str = "adult"  # "adult" or "bullying"
+    report_type: str = "adult"
     CONFIG_PATH = Path("fb_report_config.json")
     
     def save(self):
@@ -88,18 +73,15 @@ class Browser:
         self.current_ua_index = 0
         
     def get_random_user_agent(self) -> str:
-        """Get a random user agent from the list"""
         return random.choice(USER_AGENTS)
     
     def start(self):
         opts = Options()
         
-        # Random user agent
         user_agent = self.get_random_user_agent()
         opts.add_argument(f"--user-agent={user_agent}")
         log.info(f"Using User-Agent: {user_agent[:50]}...")
         
-        # Anti-detection arguments
         opts.add_argument("--disable-blink-features=AutomationControlled")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--no-sandbox")
@@ -113,7 +95,6 @@ class Browser:
         opts.add_argument("--disable-features=BlockInsecurePrivateNetworkRequests")
         opts.add_argument("--disable-features=OutOfBlinkCors")
         
-        # Additional anti-fingerprinting
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         opts.add_experimental_option("prefs", {
@@ -138,7 +119,6 @@ class Browser:
         except:
             self.driver = webdriver.Chrome(options=opts)
             
-        # Execute CDP commands to hide automation
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
             "source": """
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -204,41 +184,55 @@ class Session:
         pass_inp.send_keys(Keys.RETURN)
         time.sleep(5 + random.randint(1, 3))
 
-        for _ in range(20):
+        # Handle 2FA automatically - wait for user to solve it
+        for attempt in range(30):  # Try for up to ~2 minutes
             url = self.driver.current_url.lower()
+            
+            # Check if we're at the 2FA page
             if "checkpoint" in url or "two_step" in url or "authentication" in url:
-                log.warning("2FA required")
-                try:
-                    inp = self.driver.find_element(By.ID, "approvals_code")
-                    code = input("2FA code: ").strip()
-                    if code:
-                        for char in code:
-                            inp.send_keys(char)
-                            time.sleep(random.uniform(0.05, 0.1))
-                        time.sleep(1)
-                        for _ in range(5):
-                            try:
-                                self.driver.find_element(By.ID, "checkpointSubmitButton").click()
-                                time.sleep(2)
-                            except: break
+                log.warning("2FA required - Waiting for you to solve it...")
+                log.info("📱 Please solve 2FA in the browser window...")
+                log.info("⏳ Waiting for 2FA to be resolved...")
+                
+                # Wait for 2FA to be solved (check every 2 seconds)
+                for _ in range(30):  # Wait up to 60 seconds
+                    time.sleep(2)
+                    current_url = self.driver.current_url.lower()
+                    # Check if 2FA is resolved (no longer on checkpoint page)
+                    if "checkpoint" not in current_url and "two_step" not in current_url and "authentication" not in current_url:
+                        log.info("✅ 2FA resolved! Continuing...")
                         time.sleep(3)
-                        continue
-                except: pass
-                input("Resolve 2FA in browser, then press Enter...")
-                time.sleep(3)
-                continue
-            break
+                        # Save cookies after successful 2FA
+                        self._save_cookies()
+                        return True
+                break
+            elif "login" not in url or "facebook.com" in url:
+                # Successfully logged in
+                log.info("✅ Successfully logged in!")
+                self._save_cookies()
+                return True
+            
+            time.sleep(1)
+            
+        # Wait for any redirects to complete
+        time.sleep(3)
 
-        if "login" in self.driver.current_url.lower() and "checkpoint" not in self.driver.current_url.lower():
-            return False
-
-        log.info(f"Logged in! ({self.driver.current_url[:50]})")
+        # Check if login was successful
+        current_url = self.driver.current_url.lower()
+        if "login" in current_url and "checkpoint" not in current_url:
+            log.warning("Login may have failed. Trying to continue...")
+            
+        log.info(f"Current URL: {self.driver.current_url[:50]}")
         self._save_cookies()
         return True
 
     def _save_cookies(self):
-        with open(self.config.cookie_file, "w") as f:
-            json.dump(self.driver.get_cookies(), f)
+        try:
+            with open(self.config.cookie_file, "w") as f:
+                json.dump(self.driver.get_cookies(), f)
+            log.info("Cookies saved successfully!")
+        except Exception as e:
+            log.warning(f"Could not save cookies: {e}")
 
     def load_cookies(self) -> bool:
         if not Path(self.config.cookie_file).exists():
@@ -264,7 +258,6 @@ class Reporter:
         self.last_report_time = None
         
     def random_delay(self, min_sec: int = 30, max_sec: int = 90):
-        """Random delay between reports to avoid detection"""
         delay = random.randint(min_sec, max_sec)
         log.info(f"Waiting {delay} seconds before next report...")
         time.sleep(delay)
@@ -292,7 +285,6 @@ class Reporter:
         return False
 
     def click_three_dots(self):
-        """Click the three-dots SVG menu on a Facebook profile."""
         try:
             svgs = self.driver.find_elements(By.XPATH, "//*[name()='svg']")
             for svg in svgs:
@@ -323,9 +315,7 @@ class Reporter:
         return False
 
     def check_if_banned(self, target: str) -> bool:
-        """Check if the account has been banned"""
         try:
-            # Check for account disabled message
             page_source = self.driver.page_source.lower()
             banned_indicators = [
                 "account disabled",
@@ -343,7 +333,6 @@ class Reporter:
                 if indicator in page_source:
                     return True
                     
-            # Check for specific URLs indicating ban
             current_url = self.driver.current_url.lower()
             if "disabled" in current_url or "suspended" in current_url:
                 return True
@@ -353,7 +342,6 @@ class Reporter:
             return False
 
     def report_profile_adult(self, target: str) -> Tuple[bool, str]:
-        """Report profile for Adult content -> Nudity or sexual activity"""
         target = target.strip()
         if target.startswith("http"):
             url = target
@@ -369,13 +357,11 @@ class Reporter:
         if "this page isn't available" in self.driver.page_source.lower():
             return False, "Profile not found"
 
-        # Step 1: Click three-dots SVG menu
         log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 2: Click "Report profile"
         log.info("Step 2: Clicking 'Report profile'...")
         if not self.find_and_click([
             "//span[text()='Report profile']",
@@ -388,7 +374,6 @@ class Reporter:
             return False, "Could not find Report profile button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 3: Click "Something about this profile"
         log.info("Step 3: Clicking 'Something about this profile'...")
         if not self.find_and_click([
             "//span[text()='Something about this profile']",
@@ -401,7 +386,6 @@ class Reporter:
             return False, "Could not find 'Something about this profile' button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 4: Click "Adult content"
         log.info("Step 4: Clicking 'Adult content'...")
         if not self.find_and_click([
             "//span[text()='Adult content']",
@@ -414,7 +398,6 @@ class Reporter:
             return False, "Could not find 'Adult content' button"
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 5: Click "Nudity or sexual activity"
         log.info("Step 5: Clicking 'Nudity or sexual activity'...")
         if not self.find_and_click([
             "//span[text()='Nudity or sexual activity']",
@@ -427,7 +410,6 @@ class Reporter:
             return False, "Could not find 'Nudity or sexual activity' button"
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 6: Submit
         log.info("Step 6: Submitting...")
         submit_xpaths = [
             "//div[@role='button']//span[text()='Submit']",
@@ -449,7 +431,6 @@ class Reporter:
                 break
             time.sleep(2)
         
-        # Handle any checkboxes that might appear
         try:
             for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
                 if cb.is_displayed():
@@ -459,7 +440,6 @@ class Reporter:
                     break
         except: pass
 
-        # Step 7: Click "Next" button if present
         log.info("Step 7: Clicking 'Next' button...")
         next_xpaths = [
             "//div[@role='button']//span[text()='Next']",
@@ -474,7 +454,6 @@ class Reporter:
         self.find_and_click(next_xpaths, 3)
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 8: Click "Done" button if present
         log.info("Step 8: Clicking 'Done' button...")
         done_xpaths = [
             "//div[@role='button']//span[text()='Done']",
@@ -489,11 +468,9 @@ class Reporter:
         self.find_and_click(done_xpaths, 3)
         time.sleep(2)
 
-        # Check if account got banned
         if self.check_if_banned(target):
             return True, "ACCOUNT BANNED! Report successful!"
 
-        # Check for success
         page_text = self.driver.page_source.lower()
         if "thank" in page_text or "terima" in page_text or "success" in page_text:
             return True, "Profile reported for Adult content successfully!"
@@ -504,7 +481,6 @@ class Reporter:
         return False, "Could not submit adult content report"
 
     def report_profile_bullying(self, target: str) -> Tuple[bool, str]:
-        """Report profile for Bullying, harassment or abuse -> Seems like sexual exploitation"""
         target = target.strip()
         if target.startswith("http"):
             url = target
@@ -520,13 +496,11 @@ class Reporter:
         if "this page isn't available" in self.driver.page_source.lower():
             return False, "Profile not found"
 
-        # Step 1: Click three-dots SVG menu
         log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 2: Click "Report profile"
         log.info("Step 2: Clicking 'Report profile'...")
         if not self.find_and_click([
             "//span[text()='Report profile']",
@@ -539,7 +513,6 @@ class Reporter:
             return False, "Could not find Report profile button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 3: Click "Something about this profile"
         log.info("Step 3: Clicking 'Something about this profile'...")
         if not self.find_and_click([
             "//span[text()='Something about this profile']",
@@ -552,7 +525,6 @@ class Reporter:
             return False, "Could not find 'Something about this profile' button"
         time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 4: Click "Bullying, harassment or abuse"
         log.info("Step 4: Clicking 'Bullying, harassment or abuse'...")
         if not self.find_and_click([
             "//span[text()='Bullying, harassment or abuse']",
@@ -565,7 +537,6 @@ class Reporter:
             return False, "Could not find 'Bullying, harassment or abuse' button"
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 5: Click "Seems like sexual exploitation"
         log.info("Step 5: Clicking 'Seems like sexual exploitation'...")
         if not self.find_and_click([
             "//span[text()='Seems like sexual exploitation']",
@@ -578,7 +549,6 @@ class Reporter:
             return False, "Could not find 'Seems like sexual exploitation' button"
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 6: Submit
         log.info("Step 6: Submitting...")
         submit_xpaths = [
             "//div[@role='button']//span[text()='Submit']",
@@ -600,7 +570,6 @@ class Reporter:
                 break
             time.sleep(2)
         
-        # Handle any checkboxes that might appear
         try:
             for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
                 if cb.is_displayed():
@@ -610,7 +579,6 @@ class Reporter:
                     break
         except: pass
 
-        # Step 7: Click "Next" button if present
         log.info("Step 7: Clicking 'Next' button...")
         next_xpaths = [
             "//div[@role='button']//span[text()='Next']",
@@ -625,7 +593,6 @@ class Reporter:
         self.find_and_click(next_xpaths, 3)
         time.sleep(2 + random.uniform(0.5, 1))
 
-        # Step 8: Click "Done" button if present
         log.info("Step 8: Clicking 'Done' button...")
         done_xpaths = [
             "//div[@role='button']//span[text()='Done']",
@@ -640,11 +607,9 @@ class Reporter:
         self.find_and_click(done_xpaths, 3)
         time.sleep(2)
 
-        # Check if account got banned
         if self.check_if_banned(target):
             return True, "ACCOUNT BANNED! Report successful!"
 
-        # Check for success
         page_text = self.driver.page_source.lower()
         if "thank" in page_text or "terima" in page_text or "success" in page_text:
             return True, "Profile reported for Bullying/Harassment successfully!"
@@ -655,7 +620,6 @@ class Reporter:
         return False, "Could not submit bullying/harassment report"
 
     def report_profile(self, target: str, report_type: str = "adult") -> Tuple[bool, str]:
-        """Report profile with specified type: 'adult' or 'bullying'"""
         if report_type == "bullying":
             return self.report_profile_bullying(target)
         else:
@@ -665,7 +629,6 @@ class Reporter:
                                   max_reports: int = 100, 
                                   delay_min: int = 30, 
                                   delay_max: int = 90) -> Dict:
-        """Automatically report a profile until it gets banned"""
         results = {
             "target": target,
             "report_type": report_type,
@@ -688,7 +651,6 @@ class Reporter:
         for i in range(1, max_reports + 1):
             log.info(f"\n--- Report #{i} ---")
             
-            # Check if account is already banned before reporting
             self.driver.get(f"https://www.facebook.com/{target}")
             time.sleep(3)
             if self.check_if_banned(target):
@@ -697,7 +659,6 @@ class Reporter:
                 results["end_time"] = datetime.now().isoformat()
                 break
             
-            # Perform the report
             success, message = self.report_profile(target, report_type)
             
             report_entry = {
@@ -712,7 +673,6 @@ class Reporter:
                 results["successful_reports"] += 1
                 log.info(f"✅ Report #{i} SUCCESS: {message}")
                 
-                # Check if account is now banned after the report
                 time.sleep(2)
                 if self.check_if_banned(target):
                     log.info("🎯 ACCOUNT BANNED! Target eliminated!")
@@ -725,7 +685,6 @@ class Reporter:
             
             results["total_reports"] = i
             
-            # Random delay between reports (except after last report)
             if i < max_reports and not results["banned"]:
                 self.random_delay(delay_min, delay_max)
         
@@ -798,7 +757,6 @@ class Reporter:
         results = {}
         for t in targets:
             log.info(f"\n=== Processing target: {t} ===")
-            # Use auto-report for each target
             r = self.auto_report_until_banned(
                 t, 
                 report_type=report_type,
@@ -825,7 +783,7 @@ class Reporter:
 
 def banner():
     print("\n" + "="*70)
-    print("  FB Mass Report v5.0 — Auto-Report Until Banned with Rotating User Agents")
+    print("  FB Mass Report v5.1 — Auto-Report Until Banned with Automatic 2FA Handling")
     print("="*70)
 
 def menu():
@@ -901,7 +859,6 @@ def main():
                 delay_min = int(input(f"Min delay [{config.report_delay_min}]: ").strip() or config.report_delay_min)
                 delay_max = int(input(f"Max delay [{config.report_delay_max}]: ").strip() or config.report_delay_max)
                 results = reporter.auto_report_until_banned(t, "adult", max_r, delay_min, delay_max)
-                # Save results to file
                 with open(f"report_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", "w") as f:
                     json.dump(results, f, indent=2)
                 log.info(f"📁 Results saved to file")
