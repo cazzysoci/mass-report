@@ -579,6 +579,64 @@ class Reporter:
 
         return True, "Post reported"
 
+    def auto_report_until_banned(self, target: str, delay_between: int = 30) -> Tuple[bool, str]:
+        """
+        Automatically report the profile using both methods until it gets banned.
+        Cycles between Adult content and Bullying/Harassment reports.
+        """
+        target = target.strip()
+        report_types = ['adult', 'bullying']
+        report_count = 0
+        success_count = 0
+        
+        log.info(f"Starting automatic reporting for {target} until banned...")
+        log.info("Will cycle between Adult content and Bullying/Harassment reports")
+        
+        while True:
+            for report_type in report_types:
+                report_count += 1
+                log.info(f"\n{'='*60}")
+                log.info(f"Report #{report_count} - Type: {report_type.upper()}")
+                log.info(f"{'='*60}")
+                
+                if report_type == 'adult':
+                    success, msg = self.report_profile_adult(target)
+                else:
+                    success, msg = self.report_profile_bullying_harassment(target)
+                
+                if success:
+                    success_count += 1
+                    log.info(f"[SUCCESS] {msg}")
+                else:
+                    log.warning(f"[FAILED] {msg}")
+                
+                # Check if account is banned
+                if self.check_if_banned(target):
+                    log.info(f"\n{'='*60}")
+                    log.info(f"🎯 ACCOUNT BANNED! Total reports sent: {report_count}")
+                    log.info(f"Successful reports: {success_count}")
+                    log.info(f"{'='*60}")
+                    return True, f"Account banned after {report_count} reports!"
+                
+                # Wait before next report
+                if report_count > 0:
+                    wait_time = delay_between + random.randint(0, 10)
+                    log.info(f"Waiting {wait_time} seconds before next report...")
+                    time.sleep(wait_time)
+                
+                # Also check if profile still exists
+                try:
+                    self.driver.get(f"https://www.facebook.com/{target}")
+                    time.sleep(3)
+                    if "this page isn't available" in self.driver.page_source.lower():
+                        log.info(f"\n{'='*60}")
+                        log.info(f"🎯 PROFILE DELETED/BANNED! Total reports sent: {report_count}")
+                        log.info(f"Successful reports: {success_count}")
+                        log.info(f"{'='*60}")
+                        return True, f"Profile deleted after {report_count} reports!"
+                except:
+                    pass
+
     def mass_report_profiles_adult(self, targets: List[str], count: int = 3) -> Dict:
         """
         Mass report profiles for adult content
@@ -639,10 +697,11 @@ def menu():
     print("  5. Mass report profiles (Bullying/Harassment)")
     print("  6. Report post")
     print("  7. Mass report posts")
-    print("  8. Settings")
-    print("  9. Exit")
+    print("  8. 🔥 AUTO-REPORT UNTIL BANNED (Cycles both methods)")
+    print("  9. Settings")
+    print("  10. Exit")
     try: return int(input("> ").strip())
-    except: return 9
+    except: return 10
 
 def settings(config):
     e = input(f"Email [{config.email}]: ").strip() or config.email
@@ -713,9 +772,16 @@ def main():
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
                 r = reporter.mass_report_posts(targets, cnt)
                 print(json.dumps(r, indent=2))
-        elif opt == 8: 
-            settings(config)
+        elif opt == 8:
+            t = input("Profile (URL, ID, username): ").strip()
+            if t:
+                delay = input("Delay between reports in seconds [30]: ").strip()
+                delay = int(delay) if delay else 30
+                ok, msg = reporter.auto_report_until_banned(t, delay)
+                log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
         elif opt == 9: 
+            settings(config)
+        elif opt == 10: 
             break
 
     engine.stop()
