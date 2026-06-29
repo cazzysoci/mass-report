@@ -351,9 +351,11 @@ class Reporter:
             return True, "Profile reported successfully!"
         return True, "Report submitted."
 
-    def report_profile_sexual_exploitation(self, target: str) -> Tuple[bool, str]:
+    def report_profile_bullying_harassment(self, target: str) -> Tuple[bool, str]:
         """
-        Report a profile for Bullying, harassment or abuse -> Seems like sexual exploitation
+        Report a profile for Bullying, harassment or abuse
+        Complete flow: Report profile -> Something about this profile -> 
+        Bullying, harassment or abuse -> Seems like sexual exploitation
         """
         target = target.strip()
         if target.startswith("http"):
@@ -402,30 +404,31 @@ class Reporter:
             return False, "Could not find 'Something about this profile' button"
         time.sleep(3)
 
-        # Step 4: Click "Adult content"
-        log.info("Step 4: Clicking 'Adult content'...")
+        # Step 4: Click "Bullying, harassment or abuse"
+        log.info("Step 4: Clicking 'Bullying, harassment or abuse'...")
         if not self.find_and_click([
-            "//span[text()='Adult content']",
-            "//span[contains(text(),'Adult content')]",
-            "//span[text()='Konten dewasa']",
-            "//span[contains(text(),'Konten dewasa')]",
-            "//*[contains(text(),'Adult content')]",
-            "//*[contains(text(),'Konten dewasa')]",
+            "//span[text()='Bullying, harassment or abuse']",
+            "//span[contains(text(),'Bullying, harassment or abuse')]",
+            "//span[text()='Penindasan, pelecehan, atau penyalahgunaan']",
+            "//span[contains(text(),'Penindasan')]",
+            "//span[contains(text(),'pelecehan')]",
+            "//*[contains(text(),'Bullying')]",
+            "//*[contains(text(),'Penindasan')]",
         ], 5):
-            return False, "Could not find 'Adult content' button"
+            return False, "Could not find 'Bullying, harassment or abuse' button"
         time.sleep(3)
 
-        # Step 5: Click "Nudity or sexual activity"
-        log.info("Step 5: Clicking 'Nudity or sexual activity'...")
+        # Step 5: Click "Seems like sexual exploitation"
+        log.info("Step 5: Clicking 'Seems like sexual exploitation'...")
         if not self.find_and_click([
-            "//span[text()='Nudity or sexual activity']",
-            "//span[contains(text(),'Nudity or sexual activity')]",
-            "//span[text()='Ketelanjangan atau aktivitas seksual']",
-            "//span[contains(text(),'Ketelanjangan atau aktivitas seksual')]",
-            "//*[contains(text(),'Nudity or sexual activity')]",
-            "//*[contains(text(),'Ketelanjangan')]",
+            "//span[text()='Seems like sexual exploitation']",
+            "//span[contains(text(),'Seems like sexual exploitation')]",
+            "//span[text()='Terlihat seperti eksploitasi seksual']",
+            "//span[contains(text(),'eksploitasi seksual')]",
+            "//*[contains(text(),'sexual exploitation')]",
+            "//*[contains(text(),'eksploitasi seksual')]",
         ], 5):
-            return False, "Could not find 'Nudity or sexual activity' button"
+            return False, "Could not find 'Seems like sexual exploitation' button"
         time.sleep(3)
 
         # Step 6: Click Submit
@@ -467,73 +470,9 @@ class Reporter:
             log.warning("Could not find Done button (might not be needed)")
         time.sleep(3)
 
-        # Step 9: Click "Bullying, harassment or abuse"
-        log.info("Step 9: Clicking 'Bullying, harassment or abuse'...")
-        if not self.find_and_click([
-            "//span[text()='Bullying, harassment or abuse']",
-            "//span[contains(text(),'Bullying, harassment or abuse')]",
-            "//span[text()='Penindasan, pelecehan, atau penyalahgunaan']",
-            "//span[contains(text(),'Penindasan')]",
-            "//*[contains(text(),'Bullying')]",
-            "//*[contains(text(),'Penindasan')]",
-        ], 5):
-            return False, "Could not find 'Bullying, harassment or abuse' button"
-        time.sleep(3)
-
-        # Step 10: Click "Seems like sexual exploitation"
-        log.info("Step 10: Clicking 'Seems like sexual exploitation'...")
-        if not self.find_and_click([
-            "//span[text()='Seems like sexual exploitation']",
-            "//span[contains(text(),'Seems like sexual exploitation')]",
-            "//span[text()='Terlihat seperti eksploitasi seksual']",
-            "//span[contains(text(),'eksploitasi seksual')]",
-            "//*[contains(text(),'sexual exploitation')]",
-            "//*[contains(text(),'eksploitasi seksual')]",
-        ], 5):
-            return False, "Could not find 'Seems like sexual exploitation' button"
-        time.sleep(3)
-
-        # Step 11: Click Submit
-        log.info("Step 11: Clicking Submit...")
-        if not self.find_and_click([
-            "//div[@role='button']//span[text()='Submit']",
-            "//div[@role='button']//span[text()='Kirim']",
-            "//span[text()='Submit']",
-            "//span[contains(text(),'Submit')]",
-            "//input[@type='submit']",
-            "//button[@type='submit']",
-            "//div[@role='button' and contains(text(),'Submit')]",
-        ], 5):
-            return False, "Could not find Submit button"
-        time.sleep(3)
-
-        # Step 12: Click Next
-        log.info("Step 12: Clicking Next...")
-        if not self.find_and_click([
-            "//div[@role='button']//span[text()='Next']",
-            "//span[text()='Next']",
-            "//span[contains(text(),'Next')]",
-            "//button[contains(text(),'Next')]",
-            "//div[@role='button' and contains(text(),'Next')]",
-        ], 5):
-            log.warning("Could not find Next button (might not be needed)")
-        time.sleep(3)
-
-        # Step 13: Click Done
-        log.info("Step 13: Clicking Done...")
-        if not self.find_and_click([
-            "//div[@role='button']//span[text()='Done']",
-            "//span[text()='Done']",
-            "//span[contains(text(),'Done')]",
-            "//button[contains(text(),'Done')]",
-            "//div[@role='button' and contains(text(),'Done')]",
-        ], 5):
-            log.warning("Could not find Done button (might not be needed)")
-        time.sleep(3)
-
         if "thank" in self.driver.page_source.lower() or "terima" in self.driver.page_source.lower():
-            return True, "Profile reported for sexual exploitation successfully!"
-        return True, "Report submitted for sexual exploitation."
+            return True, "Profile reported for bullying/harassment successfully!"
+        return True, "Report submitted for bullying/harassment."
 
     def report_post(self, post_url: str) -> Tuple[bool, str]:
         log.info(f"Opening post: {post_url}")
@@ -600,16 +539,16 @@ class Reporter:
             results[t] = (ok, fail)
         return results
 
-    def mass_report_profiles_sexual_exploitation(self, targets: List[str], count: int = 3) -> Dict:
+    def mass_report_profiles_bullying_harassment(self, targets: List[str], count: int = 3) -> Dict:
         """
-        Mass report profiles for sexual exploitation
+        Mass report profiles for bullying/harassment
         """
         results = {}
         for t in targets:
             ok, fail = 0, 0
             for i in range(count):
                 log.info(f"[{t}] {i+1}/{count}")
-                s, msg = self.report_profile_sexual_exploitation(t)
+                s, msg = self.report_profile_bullying_harassment(t)
                 if s: ok += 1
                 else: fail += 1
                 log.info(f"  {'OK' if s else 'FAIL'}: {msg}")
@@ -641,8 +580,8 @@ def menu():
     print("  3. Report post")
     print("  4. Mass report profiles (Fake Account)")
     print("  5. Mass report posts")
-    print("  6. Report profile (Sexual Exploitation)")
-    print("  7. Mass report profiles (Sexual Exploitation)")
+    print("  6. Report profile (Bullying/Harassment)")
+    print("  7. Mass report profiles (Bullying/Harassment)")
     print("  8. Settings")
     print("  9. Exit")
     try: return int(input("> ").strip())
@@ -707,14 +646,14 @@ def main():
         elif opt == 6:
             t = input("Profile (URL, ID, username): ").strip()
             if t:
-                ok, msg = reporter.report_profile_sexual_exploitation(t)
+                ok, msg = reporter.report_profile_bullying_harassment(t)
                 log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
         elif opt == 7:
             raw = input("Profiles (comma-sep): ").strip()
             if raw:
                 targets = [x.strip() for x in raw.split(",") if x.strip()]
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
-                r = reporter.mass_report_profiles_sexual_exploitation(targets, cnt)
+                r = reporter.mass_report_profiles_bullying_harassment(targets, cnt)
                 print(json.dumps(r, indent=2))
         elif opt == 8: settings(config)
         elif opt == 9: break
