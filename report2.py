@@ -258,29 +258,23 @@ class Reporter:
 
         return False
 
-    def click_hide_or_report(self):
-        """Click 'Hide or report this' — the report button on the popup menu."""
-        if self.find_and_click([
-            "//*[@aria-label='Hide or report this']",
-            "//span[contains(text(),'Hide or report')]",
-            "//*[contains(text(),'Hide or report')]",
-            "//span[contains(text(),'Find support or report')]",
-            "//*[contains(text(),'Find support or report')]",
-            "//span[contains(text(),'report profile')]",
-            "//span[contains(text(),'Laporkan')]",
-        ], 5):
-            return True
-        # Fallback: find any menu item with report/hide
+    def check_if_banned(self, target: str) -> bool:
+        """Check if the account has been banned."""
         try:
-            for el in self.driver.find_elements(By.XPATH, "//div[@role='button']//span"):
-                t = (el.text or "").lower()
-                if "report" in t or "hide" in t or "laporkan" in t:
-                    self.js_click(el)
-                    return True
-        except: pass
+            page_source = self.driver.page_source.lower()
+            if "this account has been disabled" in page_source or "account disabled" in page_source:
+                log.info("Account has been banned!")
+                return True
+        except:
+            pass
         return False
 
-    def report_profile(self, target: str) -> Tuple[bool, str]:
+    def report_profile_adult(self, target: str) -> Tuple[bool, str]:
+        """
+        Report a profile for Adult content -> Nudity or sexual activity
+        Complete flow: Report profile -> Something about this profile -> 
+        Adult content -> Nudity or sexual activity -> Submit -> Next -> Done
+        """
         target = target.strip()
         if target.startswith("http"):
             url = target
@@ -291,65 +285,133 @@ class Reporter:
 
         log.info(f"Opening: {url}")
         self.driver.get(url)
-        time.sleep(6)
+        time.sleep(6 + random.randint(1, 3))
 
         if "this page isn't available" in self.driver.page_source.lower():
             return False, "Profile not found"
 
-        # Step 1: Click three-dots SVG menu
         log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
-        time.sleep(3)
+        time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 2: Click "Hide or report this"
-        log.info("Step 2: Clicking 'Hide or report this'...")
-        if not self.click_hide_or_report():
-            return False, "Could not find report option in menu"
-        time.sleep(3)
-
-        # Step 3: Select "Fake Account"
-        log.info("Step 3: Selecting Fake Account...")
+        log.info("Step 2: Clicking 'Report profile'...")
         if not self.find_and_click([
-            "//span[text()='Fake Account']",
-            "//span[text()='Akun Palsu']",
-            "//span[contains(text(),'Fake')]",
-            "//span[contains(text(),'Palsu')]",
-            "//*[contains(text(),'Fake')]",
-            "//*[contains(text(),'Palsu')]",
-        ], 4):
-            return False, "Could not select Fake Account"
-        time.sleep(2)
+            "//span[text()='Report profile']",
+            "//span[contains(text(),'Report profile')]",
+            "//span[text()='Laporkan profil']",
+            "//span[contains(text(),'Laporkan profil')]",
+            "//*[contains(text(),'Report profile')]",
+            "//*[contains(text(),'Laporkan profil')]",
+        ], 5):
+            return False, "Could not find Report profile button"
+        time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # "Me" if present
-        self.find_and_click(["//span[text()='Me']", "//span[text()='Saya']"], 2)
-        time.sleep(1)
+        log.info("Step 3: Clicking 'Something about this profile'...")
+        if not self.find_and_click([
+            "//span[text()='Something about this profile']",
+            "//span[contains(text(),'Something about this profile')]",
+            "//span[text()='Sesuatu tentang profil ini']",
+            "//span[contains(text(),'Sesuatu tentang profil ini')]",
+            "//*[contains(text(),'Something about this profile')]",
+            "//*[contains(text(),'Sesuatu tentang profil ini')]",
+        ], 5):
+            return False, "Could not find 'Something about this profile' button"
+        time.sleep(3 + random.uniform(0.5, 1.5))
 
-        # Step 4: Submit
-        log.info("Step 4: Submitting...")
+        log.info("Step 4: Clicking 'Adult content'...")
+        if not self.find_and_click([
+            "//span[text()='Adult content']",
+            "//span[contains(text(),'Adult content')]",
+            "//span[text()='Konten dewasa']",
+            "//span[contains(text(),'Konten dewasa')]",
+            "//*[contains(text(),'Adult content')]",
+            "//*[contains(text(),'Konten dewasa')]",
+        ], 5):
+            return False, "Could not find 'Adult content' button"
+        time.sleep(2 + random.uniform(0.5, 1))
+
+        log.info("Step 5: Clicking 'Nudity or sexual activity'...")
+        if not self.find_and_click([
+            "//span[text()='Nudity or sexual activity']",
+            "//span[contains(text(),'Nudity or sexual activity')]",
+            "//span[text()='Ketelanjangan atau aktivitas seksual']",
+            "//span[contains(text(),'Ketelanjangan atau aktivitas seksual')]",
+            "//*[contains(text(),'Nudity or sexual activity')]",
+            "//*[contains(text(),'Ketelanjangan atau aktivitas seksual')]",
+        ], 5):
+            return False, "Could not find 'Nudity or sexual activity' button"
+        time.sleep(2 + random.uniform(0.5, 1))
+
+        log.info("Step 6: Submitting...")
         submit_xpaths = [
             "//div[@role='button']//span[text()='Submit']",
             "//div[@role='button']//span[text()='Kirim']",
+            "//div[@role='button']//span[contains(text(),'Submit')]",
+            "//div[@role='button']//span[contains(text(),'Kirim')]",
             "//input[@type='submit']",
             "//button[@type='submit']",
             "//div[@role='button' and contains(text(),'Submit')]",
-            "//div[@role='button']//span[text()='Next']",
             "//div[@role='button']//span[text()='Send']",
         ]
-        for _ in range(2):
-            self.find_and_click(submit_xpaths, 4)
+        
+        submitted = False
+        for _ in range(3):
+            if self.find_and_click(submit_xpaths, 4):
+                submitted = True
+                log.info("Submit button clicked")
+                time.sleep(3 + random.uniform(0.5, 1.5))
+                break
             time.sleep(2)
-            try:
-                for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
-                    if cb.is_displayed():
-                        self.js_click(cb)
-                        time.sleep(1)
-                        break
-            except: pass
+        
+        try:
+            for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
+                if cb.is_displayed():
+                    self.js_click(cb)
+                    time.sleep(1)
+                    self.find_and_click(submit_xpaths, 3)
+                    break
+        except: pass
 
-        if "thank" in self.driver.page_source.lower() or "terima" in self.driver.page_source.lower():
-            return True, "Profile reported successfully!"
-        return True, "Report submitted."
+        log.info("Step 7: Clicking 'Next' button...")
+        next_xpaths = [
+            "//div[@role='button']//span[text()='Next']",
+            "//div[@role='button']//span[contains(text(),'Next')]",
+            "//span[text()='Next']",
+            "//span[contains(text(),'Next')]",
+            "//button[contains(text(),'Next')]",
+            "//div[@role='button' and contains(text(),'Next')]",
+            "//div[@role='button']//span[text()='Lanjut']",
+            "//span[text()='Lanjut']",
+        ]
+        self.find_and_click(next_xpaths, 3)
+        time.sleep(2 + random.uniform(0.5, 1))
+
+        log.info("Step 8: Clicking 'Done' button...")
+        done_xpaths = [
+            "//div[@role='button']//span[text()='Done']",
+            "//div[@role='button']//span[contains(text(),'Done')]",
+            "//span[text()='Done']",
+            "//span[contains(text(),'Done')]",
+            "//button[contains(text(),'Done')]",
+            "//div[@role='button' and contains(text(),'Done')]",
+            "//div[@role='button']//span[text()='Selesai']",
+            "//span[text()='Selesai']",
+        ]
+        self.find_and_click(done_xpaths, 3)
+        time.sleep(2)
+
+        if self.check_if_banned(target):
+            return True, "ACCOUNT BANNED! Report successful!"
+
+        page_text = self.driver.page_source.lower()
+        if "thank" in page_text or "terima" in page_text or "success" in page_text:
+            return True, "Profile reported for Adult content successfully!"
+        
+        if submitted:
+            return True, "Adult content report submitted successfully!"
+            
+        return False, "Could not submit adult content report"
 
     def report_profile_bullying_harassment(self, target: str) -> Tuple[bool, str]:
         """
@@ -372,13 +434,11 @@ class Reporter:
         if "this page isn't available" in self.driver.page_source.lower():
             return False, "Profile not found"
 
-        # Step 1: Click three-dots SVG menu
         log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
         time.sleep(3)
 
-        # Step 2: Click "Report profile"
         log.info("Step 2: Clicking 'Report profile'...")
         if not self.find_and_click([
             "//span[text()='Report profile']",
@@ -391,7 +451,6 @@ class Reporter:
             return False, "Could not find Report profile button"
         time.sleep(3)
 
-        # Step 3: Click "Something about this profile"
         log.info("Step 3: Clicking 'Something about this profile'...")
         if not self.find_and_click([
             "//span[text()='Something about this profile']",
@@ -404,7 +463,6 @@ class Reporter:
             return False, "Could not find 'Something about this profile' button"
         time.sleep(3)
 
-        # Step 4: Click "Bullying, harassment or abuse"
         log.info("Step 4: Clicking 'Bullying, harassment or abuse'...")
         if not self.find_and_click([
             "//span[text()='Bullying, harassment or abuse']",
@@ -418,7 +476,6 @@ class Reporter:
             return False, "Could not find 'Bullying, harassment or abuse' button"
         time.sleep(3)
 
-        # Step 5: Click "Seems like sexual exploitation"
         log.info("Step 5: Clicking 'Seems like sexual exploitation'...")
         if not self.find_and_click([
             "//span[text()='Seems like sexual exploitation']",
@@ -431,7 +488,6 @@ class Reporter:
             return False, "Could not find 'Seems like sexual exploitation' button"
         time.sleep(3)
 
-        # Step 6: Click Submit
         log.info("Step 6: Clicking Submit...")
         submit_xpaths = [
             "//div[@role='button']//span[text()='Submit']",
@@ -446,7 +502,6 @@ class Reporter:
             return False, "Could not find Submit button"
         time.sleep(3)
 
-        # Step 7: Click Next
         log.info("Step 7: Clicking Next...")
         if not self.find_and_click([
             "//div[@role='button']//span[text()='Next']",
@@ -458,7 +513,6 @@ class Reporter:
             log.warning("Could not find Next button (might not be needed)")
         time.sleep(3)
 
-        # Step 8: Click Done
         log.info("Step 8: Clicking Done...")
         if not self.find_and_click([
             "//div[@role='button']//span[text()='Done']",
@@ -525,13 +579,16 @@ class Reporter:
 
         return True, "Post reported"
 
-    def mass_report_profiles(self, targets: List[str], count: int = 3) -> Dict:
+    def mass_report_profiles_adult(self, targets: List[str], count: int = 3) -> Dict:
+        """
+        Mass report profiles for adult content
+        """
         results = {}
         for t in targets:
             ok, fail = 0, 0
             for i in range(count):
                 log.info(f"[{t}] {i+1}/{count}")
-                s, msg = self.report_profile(t)
+                s, msg = self.report_profile_adult(t)
                 if s: ok += 1
                 else: fail += 1
                 log.info(f"  {'OK' if s else 'FAIL'}: {msg}")
@@ -576,12 +633,12 @@ def banner():
 
 def menu():
     print("\n  1. Login")
-    print("  2. Report profile (Fake Account)")
-    print("  3. Report post")
-    print("  4. Mass report profiles (Fake Account)")
-    print("  5. Mass report posts")
-    print("  6. Report profile (Bullying/Harassment)")
-    print("  7. Mass report profiles (Bullying/Harassment)")
+    print("  2. Report profile (Nudity/Sexual Activity)")
+    print("  3. Mass report profiles (Nudity/Sexual Activity)")
+    print("  4. Report profile (Bullying/Harassment)")
+    print("  5. Mass report profiles (Bullying/Harassment)")
+    print("  6. Report post")
+    print("  7. Mass report posts")
     print("  8. Settings")
     print("  9. Exit")
     try: return int(input("> ").strip())
@@ -618,45 +675,48 @@ def main():
 
     while True:
         opt = menu()
-        if opt == 1: session.login()
+        if opt == 1: 
+            session.login()
         elif opt == 2:
             t = input("Profile (URL, ID, username): ").strip()
             if t:
-                ok, msg = reporter.report_profile(t)
+                ok, msg = reporter.report_profile_adult(t)
                 log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
         elif opt == 3:
-            u = input("Post URL: ").strip()
-            if u:
-                ok, msg = reporter.report_post(u)
-                log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
-        elif opt == 4:
             raw = input("Profiles (comma-sep): ").strip()
             if raw:
                 targets = [x.strip() for x in raw.split(",") if x.strip()]
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
-                r = reporter.mass_report_profiles(targets, cnt)
+                r = reporter.mass_report_profiles_adult(targets, cnt)
                 print(json.dumps(r, indent=2))
-        elif opt == 5:
-            raw = input("Post URLs (comma-sep): ").strip()
-            if raw:
-                targets = [x.strip() for x in raw.split(",") if x.strip()]
-                cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
-                r = reporter.mass_report_posts(targets, cnt)
-                print(json.dumps(r, indent=2))
-        elif opt == 6:
+        elif opt == 4:
             t = input("Profile (URL, ID, username): ").strip()
             if t:
                 ok, msg = reporter.report_profile_bullying_harassment(t)
                 log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
-        elif opt == 7:
+        elif opt == 5:
             raw = input("Profiles (comma-sep): ").strip()
             if raw:
                 targets = [x.strip() for x in raw.split(",") if x.strip()]
                 cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
                 r = reporter.mass_report_profiles_bullying_harassment(targets, cnt)
                 print(json.dumps(r, indent=2))
-        elif opt == 8: settings(config)
-        elif opt == 9: break
+        elif opt == 6:
+            u = input("Post URL: ").strip()
+            if u:
+                ok, msg = reporter.report_post(u)
+                log.info(f"{'[OK]' if ok else '[FAIL]'} {msg}")
+        elif opt == 7:
+            raw = input("Post URLs (comma-sep): ").strip()
+            if raw:
+                targets = [x.strip() for x in raw.split(",") if x.strip()]
+                cnt = int(input(f"Reports each [{config.report_count}]: ").strip() or config.report_count)
+                r = reporter.mass_report_posts(targets, cnt)
+                print(json.dumps(r, indent=2))
+        elif opt == 8: 
+            settings(config)
+        elif opt == 9: 
+            break
 
     engine.stop()
 
