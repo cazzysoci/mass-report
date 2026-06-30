@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Facebook Mass Report Tool v4.4 — Enhanced with Headers & Fixed Auto-Ban
+Facebook Mass Report Tool v4.3 — SVG detection for three-dots menu
+Targets the actual SVG with 3 circles that IS the More button
 """
 
 import sys, os, json, random, time, re, logging
@@ -23,20 +24,6 @@ try:
     HAS_WDM = True
 except ImportError:
     HAS_WDM = False
-
-# ===== ROTATING USER AGENTS =====
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-]
-
-def get_random_ua():
-    return random.choice(USER_AGENTS)
 
 @dataclass
 class Config:
@@ -65,44 +52,53 @@ class Browser:
     def __init__(self, headless=False):
         self.headless = headless
         self.driver = None
-        self.current_ua = get_random_ua()
+        
+        # Rotating user agents for each session
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ]
         
     def start(self):
         opts = Options()
         
         # Random user agent
-        self.current_ua = get_random_ua()
-        opts.add_argument(f"--user-agent={self.current_ua}")
+        user_agent = random.choice(self.user_agents)
+        opts.add_argument(f"--user-agent={user_agent}")
         
-        # Headers that make it look like a real browser
+        # Additional headers for more legit browsing
+        opts.add_argument("--accept=text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+        opts.add_argument("--accept-encoding=gzip, deflate, br")
+        opts.add_argument("--accept-language=en-US,en;q=0.9")
+        opts.add_argument("--sec-ch-ua=\"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"")
+        opts.add_argument("--sec-ch-ua-mobile=?0")
+        opts.add_argument("--sec-ch-ua-platform=\"Windows\"")
+        opts.add_argument("--sec-fetch-dest=document")
+        opts.add_argument("--sec-fetch-mode=navigate")
+        opts.add_argument("--sec-fetch-site=none")
+        opts.add_argument("--sec-fetch-user=?1")
+        opts.add_argument("--upgrade-insecure-requests=1")
+        
         opts.add_argument("--disable-blink-features=AutomationControlled")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-gpu")
         opts.add_argument("--disable-notifications")
         opts.add_argument("--window-size=1280,720")
-        opts.add_argument("--lang=en-US,en;q=0.9")
-        opts.add_argument("--disable-extensions")
-        opts.add_argument("--disable-plugins")
-        opts.add_argument("--disable-web-security")
-        opts.add_argument("--disable-features=IsolateOrigins,site-per-process")
-        opts.add_argument("--enable-features=NetworkService,NetworkServiceInProcess")
-        
-        # Additional stealth
+        opts.add_argument("--lang=en-US")
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
         opts.add_experimental_option("prefs", {
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
             "profile.default_content_setting_values.notifications": 2,
-            "profile.default_content_setting_values.media_stream": 1,
-            "profile.default_content_setting_values.geolocation": 1,
-            "profile.default_content_setting_values.cookies": 1,
         })
-        
         if self.headless:
             opts.add_argument("--headless=new")
-            
         try:
             self.driver = webdriver.Chrome(
                 service=Service(ChromeDriverManager().install()) if HAS_WDM else None,
@@ -110,42 +106,11 @@ class Browser:
             ) if HAS_WDM else webdriver.Chrome(options=opts)
         except:
             self.driver = webdriver.Chrome(options=opts)
-            
-        # CDP commands for stealth
         self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-            "source": """
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
-                window.chrome = { runtime: {} };
-            """
+            "source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
         })
-        
-        # Set headers using CDP
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "DNT": "1",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
-        }
-        
-        for key, value in headers.items():
-            self.driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {
-                "headers": {key: value}
-            })
-            
         self.driver.implicitly_wait(3)
-        log.info(f"Browser started with UA: {self.current_ua[:50]}...")
         return self.driver
-        
     def stop(self):
         if self.driver:
             try: self.driver.quit()
@@ -155,6 +120,7 @@ class Session:
     def __init__(self, driver, config: Config):
         self.driver = driver
         self.config = config
+        self.current_profile_url = None
 
     def login(self) -> bool:
         email = self.config.email or input("Email/Phone: ").strip()
@@ -165,7 +131,7 @@ class Session:
 
         log.info("Loading facebook.com...")
         self.driver.get("https://www.facebook.com/")
-        time.sleep(4 + random.uniform(1, 3))
+        time.sleep(4)
 
         email_inp = None
         for by, sel in [(By.ID,"email"), (By.NAME,"email"), (By.CSS_SELECTOR,"input[autocomplete='username']"),
@@ -184,21 +150,14 @@ class Session:
             except: continue
         if not pass_inp: return False
 
-        # Type like a human
-        for char in email:
-            email_inp.send_keys(char)
-            time.sleep(random.uniform(0.05, 0.15))
-        
-        time.sleep(random.uniform(0.3, 0.8))
-        
-        for char in pw:
-            pass_inp.send_keys(char)
-            time.sleep(random.uniform(0.05, 0.15))
-            
-        time.sleep(random.uniform(0.5, 1.5))
+        email_inp.clear()
+        email_inp.send_keys(email)
+        pass_inp.clear()
+        pass_inp.send_keys(pw)
+        time.sleep(0.5)
         log.info("Pressing ENTER...")
         pass_inp.send_keys(Keys.RETURN)
-        time.sleep(5 + random.uniform(2, 4))
+        time.sleep(5)
 
         for _ in range(20):
             url = self.driver.current_url.lower()
@@ -208,9 +167,7 @@ class Session:
                     inp = self.driver.find_element(By.ID, "approvals_code")
                     code = input("2FA code: ").strip()
                     if code:
-                        for char in code:
-                            inp.send_keys(char)
-                            time.sleep(0.1)
+                        inp.send_keys(code)
                         time.sleep(1)
                         for _ in range(5):
                             try:
@@ -240,14 +197,13 @@ class Session:
         if not Path(self.config.cookie_file).exists():
             return False
         self.driver.get("https://www.facebook.com/")
-        time.sleep(3)
         try:
             for c in json.load(open(self.config.cookie_file)):
                 try: self.driver.add_cookie(c)
                 except: pass
         except: return False
         self.driver.get("https://www.facebook.com/")
-        time.sleep(4 + random.uniform(1, 3))
+        time.sleep(4)
         if "login" in self.driver.current_url.lower():
             return False
         log.info("Cookies restored!")
@@ -256,13 +212,12 @@ class Session:
 class Reporter:
     def __init__(self, driver):
         self.driver = driver
-        self.last_target = None
-        self.report_count = 0
+        self.last_profile_url = None
 
     def js_click(self, el):
         try:
-            self.driver.execute_script("arguments[0].scrollIntoView({block:'center', behavior:'smooth'});", el)
-            time.sleep(random.uniform(0.3, 0.7))
+            self.driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            time.sleep(0.3)
             self.driver.execute_script("arguments[0].click();", el)
             return True
         except: return False
@@ -274,7 +229,7 @@ class Reporter:
                     EC.presence_of_all_elements_located((By.XPATH, xpath))
                 ):
                     try:
-                        if el.is_displayed() and el.is_enabled():
+                        if el.is_displayed():
                             self.js_click(el)
                             return True
                     except: continue
@@ -284,17 +239,20 @@ class Reporter:
     def click_three_dots(self):
         """
         Click the three-dots SVG menu on a Facebook profile.
-        Enhanced detection with multiple strategies.
+        The SVG structure is: <svg><circle cx="4.5" cy="12" r="2.5"/>...
+        We need to use name()='svg' for SVG namespace handling.
         """
-        # Strategy 1: SVG with circle structure
+        # Strategy 1: Find the SVG by its circle structure, click its parent
         try:
             svgs = self.driver.find_elements(By.XPATH, "//*[name()='svg']")
             for svg in svgs:
                 try:
                     circles = svg.find_elements(By.XPATH, ".//*[name()='circle']")
                     if len(circles) >= 3:
+                        # Check if this has the right radius (2.5 is FB's More button)
                         radii = [c.get_attribute("r") for c in circles[:3]]
-                        if radii == ["2.5", "2.5", "2.5"] or radii == ["2", "2", "2"]:
+                        if radii == ["2.5", "2.5", "2.5"]:
+                            # Found the three-dots SVG — click its clickable parent
                             parent = svg.find_element(By.XPATH, "./ancestor::*[@role='button' or contains(@class,'x1i10hfl')]")
                             if parent:
                                 self.js_click(parent)
@@ -304,23 +262,20 @@ class Reporter:
         except Exception as e:
             log.warning(f"SVG circle detection failed: {e}")
 
-        # Strategy 2: SVG with viewBox and width
+        # Strategy 2: SVG with viewBox="0 0 24 24" and width="16" (FB's More icon)
         try:
-            for svg in self.driver.find_elements(By.XPATH, "//*[name()='svg' and (@viewBox='0 0 24 24' or @viewBox='0 0 20 20')]"):
-                parent = svg.find_element(By.XPATH, "./ancestor::*[@role='button']")
-                if parent:
-                    self.js_click(parent)
-                    log.info("Clicked three-dots via viewBox detection")
-                    return True
+            for svg in self.driver.find_elements(By.XPATH, "//*[name()='svg' and @viewBox='0 0 24 24' and @width='16']"):
+                circles = svg.find_elements(By.XPATH, ".//*[name()='circle']")
+                if len(circles) >= 3:
+                    parent = svg.find_element(By.XPATH, "./ancestor::*[@role='button']")
+                    if parent:
+                        self.js_click(parent)
+                        log.info("Clicked three-dots via viewBox detection")
+                        return True
         except: pass
 
         # Strategy 3: text "More" span
-        if self.find_and_click([
-            "//span[text()='More']", 
-            "//span[contains(text(),'More')]",
-            "//span[text()='Lainnya']",
-            "//span[contains(text(),'Lainnya')]",
-        ]):
+        if self.find_and_click(["//span[text()='More']", "//span[contains(text(),'More')]"]):
             return True
 
         # Strategy 4: aria-label
@@ -328,15 +283,6 @@ class Reporter:
             "//*[@aria-label='Profile settings see more options']",
             "//*[@aria-label='More']",
             "//*[@aria-label='More options']",
-            "//*[@aria-label='Lainnya']",
-        ]):
-            return True
-
-        # Strategy 5: data attributes
-        if self.find_and_click([
-            "//*[@data-testid='profile_more_button']",
-            "//*[@data-testid='post_more_button']",
-            "//*[contains(@class,'j83agx80')]//*[contains(@class,'rq0escxv')]//*[name()='svg']",
         ]):
             return True
 
@@ -347,21 +293,48 @@ class Reporter:
         try:
             page_source = self.driver.page_source.lower()
             if "this account has been disabled" in page_source or "account disabled" in page_source:
-                log.info("🎯 Account has been BANNED!")
-                return True
-            if "this content is no longer available" in page_source:
-                log.info("🎯 Profile/Content is gone!")
-                return True
-            if "sorry, this page isn't available" in page_source:
-                log.info("🎯 Page is not available (likely banned/deleted)!")
+                log.info("Account has been banned!")
                 return True
         except:
             pass
         return False
 
-    def reload_profile(self, target: str):
-        """Reload the profile page with a clean state."""
-        time.sleep(random.uniform(1, 3))
+    def check_profile_deleted(self, target: str) -> bool:
+        """Check if the profile has been deleted/banned."""
+        try:
+            # First, check current page if it matches target
+            current_url = self.driver.current_url.lower()
+            if "profile.php" in current_url or "facebook.com" in current_url:
+                page_source = self.driver.page_source.lower()
+                if "this page isn't available" in page_source or "content not found" in page_source:
+                    return True
+                    
+            # Try to navigate to the profile URL directly
+            if not target.startswith("http"):
+                if target.isdigit():
+                    check_url = f"https://www.facebook.com/profile.php?id={target}"
+                else:
+                    check_url = f"https://www.facebook.com/{target}"
+            else:
+                check_url = target
+                
+            # Only navigate if we're not already on the profile
+            if self.driver.current_url != check_url:
+                self.driver.get(check_url)
+                time.sleep(3)
+                page_source = self.driver.page_source.lower()
+                if "this page isn't available" in page_source or "content not found" in page_source:
+                    return True
+        except:
+            pass
+        return False
+
+    def report_profile_adult(self, target: str) -> Tuple[bool, str]:
+        """
+        Report a profile for Adult content -> Nudity or sexual activity
+        Complete flow: Report profile -> Something about this profile -> 
+        Adult content -> Nudity or sexual activity -> Submit -> Next -> Done
+        """
         target = target.strip()
         if target.startswith("http"):
             url = target
@@ -369,38 +342,17 @@ class Reporter:
             url = f"https://www.facebook.com/profile.php?id={target}"
         else:
             url = f"https://www.facebook.com/{target}"
-        
-        # Clear cookies/cache by navigating to a neutral page first
-        self.driver.get("about:blank")
-        time.sleep(random.uniform(1, 2))
-        
-        # Navigate to profile
-        log.info(f"Reloading: {url}")
+
+        log.info(f"Opening: {url}")
         self.driver.get(url)
-        time.sleep(5 + random.randint(1, 3))
+        time.sleep(6 + random.randint(1, 3))
         
-        # Check if profile exists
-        page_text = self.driver.page_source.lower()
-        if "sorry, this page isn't available" in page_text:
-            return False, "Profile not available (likely banned)"
-        if "this content is no longer available" in page_text:
-            return False, "Profile removed"
-        
-        return True, "Profile loaded"
+        # Check if profile exists before proceeding
+        if "this page isn't available" in self.driver.page_source.lower():
+            log.warning("Profile may be deleted or banned!")
+            return False, "Profile not found or already banned"
 
-    def report_profile_adult(self, target: str) -> Tuple[bool, str]:
-        """
-        Report a profile for Adult content -> Nudity or sexual activity
-        """
-        # Load/reload profile
-        success, msg = self.reload_profile(target)
-        if not success:
-            return False, msg
-
-        if self.check_if_banned(target):
-            return True, "ACCOUNT ALREADY BANNED!"
-
-        log.info("Step 1: Clicking three-dots menu...")
+        log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
         time.sleep(3 + random.uniform(0.5, 1.5))
@@ -413,7 +365,6 @@ class Reporter:
             "//span[contains(text(),'Laporkan profil')]",
             "//*[contains(text(),'Report profile')]",
             "//*[contains(text(),'Laporkan profil')]",
-            "//*[@data-testid='report_profile_menu_item']",
         ], 5):
             return False, "Could not find Report profile button"
         time.sleep(3 + random.uniform(0.5, 1.5))
@@ -464,7 +415,6 @@ class Reporter:
             "//button[@type='submit']",
             "//div[@role='button' and contains(text(),'Submit')]",
             "//div[@role='button']//span[text()='Send']",
-            "//*[@data-testid='report_submit_button']",
         ]
         
         submitted = False
@@ -478,7 +428,7 @@ class Reporter:
         
         try:
             for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
-                if cb.is_displayed() and not cb.is_selected():
+                if cb.is_displayed():
                     self.js_click(cb)
                     time.sleep(1)
                     self.find_and_click(submit_xpaths, 3)
@@ -495,7 +445,6 @@ class Reporter:
             "//div[@role='button' and contains(text(),'Next')]",
             "//div[@role='button']//span[text()='Lanjut']",
             "//span[text()='Lanjut']",
-            "//*[@data-testid='report_next_button']",
         ]
         self.find_and_click(next_xpaths, 3)
         time.sleep(2 + random.uniform(0.5, 1))
@@ -510,12 +459,10 @@ class Reporter:
             "//div[@role='button' and contains(text(),'Done')]",
             "//div[@role='button']//span[text()='Selesai']",
             "//span[text()='Selesai']",
-            "//*[@data-testid='report_done_button']",
         ]
         self.find_and_click(done_xpaths, 3)
         time.sleep(2)
 
-        # Check if account is now banned
         if self.check_if_banned(target):
             return True, "ACCOUNT BANNED! Report successful!"
 
@@ -531,19 +478,28 @@ class Reporter:
     def report_profile_bullying_harassment(self, target: str) -> Tuple[bool, str]:
         """
         Report a profile for Bullying, harassment or abuse
+        Complete flow: Report profile -> Something about this profile -> 
+        Bullying, harassment or abuse -> Seems like sexual exploitation
         """
-        # Load/reload profile
-        success, msg = self.reload_profile(target)
-        if not success:
-            return False, msg
+        target = target.strip()
+        if target.startswith("http"):
+            url = target
+        elif target.isdigit():
+            url = f"https://www.facebook.com/profile.php?id={target}"
+        else:
+            url = f"https://www.facebook.com/{target}"
 
-        if self.check_if_banned(target):
-            return True, "ACCOUNT ALREADY BANNED!"
+        log.info(f"Opening: {url}")
+        self.driver.get(url)
+        time.sleep(6)
 
-        log.info("Step 1: Clicking three-dots menu...")
+        if "this page isn't available" in self.driver.page_source.lower():
+            return False, "Profile not found"
+
+        log.info("Step 1: Clicking three-dots menu (SVG)...")
         if not self.click_three_dots():
             return False, "Could not click three-dots More button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 2: Clicking 'Report profile'...")
         if not self.find_and_click([
@@ -555,7 +511,7 @@ class Reporter:
             "//*[contains(text(),'Laporkan profil')]",
         ], 5):
             return False, "Could not find Report profile button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 3: Clicking 'Something about this profile'...")
         if not self.find_and_click([
@@ -567,7 +523,7 @@ class Reporter:
             "//*[contains(text(),'Sesuatu tentang profil ini')]",
         ], 5):
             return False, "Could not find 'Something about this profile' button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 4: Clicking 'Bullying, harassment or abuse'...")
         if not self.find_and_click([
@@ -580,7 +536,7 @@ class Reporter:
             "//*[contains(text(),'Penindasan')]",
         ], 5):
             return False, "Could not find 'Bullying, harassment or abuse' button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 5: Clicking 'Seems like sexual exploitation'...")
         if not self.find_and_click([
@@ -592,7 +548,7 @@ class Reporter:
             "//*[contains(text(),'eksploitasi seksual')]",
         ], 5):
             return False, "Could not find 'Seems like sexual exploitation' button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 6: Clicking Submit...")
         submit_xpaths = [
@@ -606,7 +562,7 @@ class Reporter:
         ]
         if not self.find_and_click(submit_xpaths, 5):
             return False, "Could not find Submit button"
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 7: Clicking Next...")
         if not self.find_and_click([
@@ -617,7 +573,7 @@ class Reporter:
             "//div[@role='button' and contains(text(),'Next')]",
         ], 5):
             log.warning("Could not find Next button (might not be needed)")
-        time.sleep(3 + random.uniform(0.5, 1.5))
+        time.sleep(3)
 
         log.info("Step 8: Clicking Done...")
         if not self.find_and_click([
@@ -630,9 +586,6 @@ class Reporter:
             log.warning("Could not find Done button (might not be needed)")
         time.sleep(3)
 
-        if self.check_if_banned(target):
-            return True, "ACCOUNT BANNED! Report successful!"
-
         if "thank" in self.driver.page_source.lower() or "terima" in self.driver.page_source.lower():
             return True, "Profile reported for bullying/harassment successfully!"
         return True, "Report submitted for bullying/harassment."
@@ -640,14 +593,14 @@ class Reporter:
     def report_post(self, post_url: str) -> Tuple[bool, str]:
         log.info(f"Opening post: {post_url}")
         self.driver.get(post_url)
-        time.sleep(5 + random.uniform(2, 4))
+        time.sleep(5)
         if "not found" in self.driver.page_source.lower() or "unavailable" in self.driver.page_source.lower():
             return False, "Post not found"
 
         log.info("Step 1: More button...")
         if not self.click_three_dots():
             return False, "No More button"
-        time.sleep(2 + random.uniform(0.5, 1.5))
+        time.sleep(2)
 
         log.info("Step 2: Report option...")
         if not self.find_and_click([
@@ -657,7 +610,7 @@ class Reporter:
             "//div[contains(text(),'Report post')]",
         ], 4):
             return False, "No report option"
-        time.sleep(2 + random.uniform(0.5, 1.5))
+        time.sleep(2)
 
         log.info("Step 3: Spam...")
         if not self.find_and_click([
@@ -667,7 +620,7 @@ class Reporter:
             "//div[contains(text(),'Spam')]",
         ], 3):
             return False, "No spam option"
-        time.sleep(2 + random.uniform(0.5, 1.5))
+        time.sleep(1.5)
 
         log.info("Step 4: Submit...")
         submit_xpaths = [
@@ -680,7 +633,7 @@ class Reporter:
             time.sleep(2)
             try:
                 for cb in self.driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
-                    if cb.is_displayed() and not cb.is_selected():
+                    if cb.is_displayed():
                         self.js_click(cb)
                         time.sleep(1)
                         break
@@ -691,16 +644,25 @@ class Reporter:
     def auto_report_until_banned(self, target: str, delay_between: int = 30) -> Tuple[bool, str]:
         """
         Automatically report the profile using both methods until it gets banned.
-        FIXED: Properly reloads profile between reports.
+        Cycles between Adult content and Bullying/Harassment reports.
+        FIXED: Uses a single browser session and reloads the profile correctly.
         """
         target = target.strip()
         report_types = ['adult', 'bullying']
         report_count = 0
         success_count = 0
         
+        # Build the profile URL once
+        if target.startswith("http"):
+            profile_url = target
+        elif target.isdigit():
+            profile_url = f"https://www.facebook.com/profile.php?id={target}"
+        else:
+            profile_url = f"https://www.facebook.com/{target}"
+        
         log.info(f"Starting automatic reporting for {target} until banned...")
+        log.info(f"Profile URL: {profile_url}")
         log.info("Will cycle between Adult content and Bullying/Harassment reports")
-        log.info("Profile will be properly reloaded between each report")
         
         while True:
             for report_type in report_types:
@@ -709,22 +671,21 @@ class Reporter:
                 log.info(f"Report #{report_count} - Type: {report_type.upper()}")
                 log.info(f"{'='*60}")
                 
-                # RELOAD PROFILE FRESH for each report
-                log.info("Loading fresh profile page...")
-                success, msg = self.reload_profile(target)
-                if not success:
-                    log.info(f"Profile no longer available: {msg}")
-                    return True, f"PROFILE DELETED/BANNED after {report_count} reports!"
+                # Navigate to profile before each report
+                log.info(f"Loading profile: {profile_url}")
+                self.driver.get(profile_url)
+                time.sleep(5 + random.randint(1, 3))
                 
-                # Check if already banned
-                if self.check_if_banned(target):
+                # Check if profile is still available
+                page_source = self.driver.page_source.lower()
+                if "this page isn't available" in page_source or "content not found" in page_source:
                     log.info(f"\n{'='*60}")
-                    log.info(f"🎯 ACCOUNT BANNED! Total reports sent: {report_count}")
+                    log.info(f"🎯 PROFILE DELETED/BANNED! Total reports sent: {report_count-1}")
                     log.info(f"Successful reports: {success_count}")
                     log.info(f"{'='*60}")
-                    return True, f"Account banned after {report_count} reports!"
+                    return True, f"Profile deleted after {report_count-1} reports!"
                 
-                # Send the report
+                # Perform the report
                 if report_type == 'adult':
                     success, msg = self.report_profile_adult(target)
                 else:
@@ -736,7 +697,7 @@ class Reporter:
                 else:
                     log.warning(f"[FAILED] {msg}")
                 
-                # Check if account is banned after report
+                # Check if account is banned on the current page
                 if self.check_if_banned(target):
                     log.info(f"\n{'='*60}")
                     log.info(f"🎯 ACCOUNT BANNED! Total reports sent: {report_count}")
@@ -744,14 +705,16 @@ class Reporter:
                     log.info(f"{'='*60}")
                     return True, f"Account banned after {report_count} reports!"
                 
-                # Wait before next report with random delay
+                # Wait before next report
                 if report_count > 0:
-                    wait_time = delay_between + random.randint(5, 15)
+                    wait_time = delay_between + random.randint(0, 10)
                     log.info(f"Waiting {wait_time} seconds before next report...")
                     time.sleep(wait_time)
 
     def mass_report_profiles_adult(self, targets: List[str], count: int = 3) -> Dict:
-        """Mass report profiles for adult content"""
+        """
+        Mass report profiles for adult content
+        """
         results = {}
         for t in targets:
             ok, fail = 0, 0
@@ -761,13 +724,14 @@ class Reporter:
                 if s: ok += 1
                 else: fail += 1
                 log.info(f"  {'OK' if s else 'FAIL'}: {msg}")
-                if i+1 < count: 
-                    time.sleep(random.randint(15, 35))
+                if i+1 < count: time.sleep(random.randint(10, 25))
             results[t] = (ok, fail)
         return results
 
     def mass_report_profiles_bullying_harassment(self, targets: List[str], count: int = 3) -> Dict:
-        """Mass report profiles for bullying/harassment"""
+        """
+        Mass report profiles for bullying/harassment
+        """
         results = {}
         for t in targets:
             ok, fail = 0, 0
@@ -777,8 +741,7 @@ class Reporter:
                 if s: ok += 1
                 else: fail += 1
                 log.info(f"  {'OK' if s else 'FAIL'}: {msg}")
-                if i+1 < count: 
-                    time.sleep(random.randint(15, 35))
+                if i+1 < count: time.sleep(random.randint(10, 25))
             results[t] = (ok, fail)
         return results
 
@@ -791,28 +754,26 @@ class Reporter:
                 s, msg = self.report_post(u)
                 if s: ok += 1
                 else: fail += 1
-                if i+1 < count: 
-                    time.sleep(random.randint(15, 35))
+                if i+1 < count: time.sleep(random.randint(10, 25))
             results[u] = (ok, fail)
         return results
 
 def banner():
     print("\n" + "="*60)
-    print("  FB Mass Report v4.4 — Enhanced Headers & Fixed Auto-Ban")
-    print("  Now with rotating user-agents and proper HTTP headers")
+    print("  FB Mass Report v4.3 — SVG Three-Dots Detection")
     print("="*60)
 
 def menu():
-    print("\n  [1] Login")
-    print("  [2] Report profile (Nudity/Sexual Activity)")
-    print("  [3] Mass report profiles (Nudity/Sexual Activity)")
-    print("  [4] Report profile (Bullying/Harassment)")
-    print("  [5] Mass report profiles (Bullying/Harassment)")
-    print("  [6] Report post")
-    print("  [7] Mass report posts")
-    print("  [8] 🔥 AUTO-REPORT UNTIL BANNED (Fixed!)")
-    print("  [9] Settings")
-    print("  [10] Exit")
+    print("\n  1. Login")
+    print("  2. Report profile (Nudity/Sexual Activity)")
+    print("  3. Mass report profiles (Nudity/Sexual Activity)")
+    print("  4. Report profile (Bullying/Harassment)")
+    print("  5. Mass report profiles (Bullying/Harassment)")
+    print("  6. Report post")
+    print("  7. Mass report posts")
+    print("  8. 🔥 AUTO-REPORT UNTIL BANNED (Cycles both methods)")
+    print("  9. Settings")
+    print("  10. Exit")
     try: return int(input("> ").strip())
     except: return 10
 
